@@ -619,11 +619,6 @@ impl Mempool {
                 )?;
             }
             MempoolNetMessage::SyncReply(metadata, data_proposal) => {
-                warn!(
-                    "SyncReply received containing {:?} <- {} ",
-                    metadata.parent_data_proposal_hash,
-                    data_proposal.hashed()
-                );
                 self.on_sync_reply(validator, metadata, data_proposal)
                     .await?;
             }
@@ -713,7 +708,10 @@ impl Mempool {
             return Ok(());
         };
 
-        warn!("Handling sync request with from: {:?} and to: {}", from, to);
+        info!(
+            "Handling sync request with from validator {} from {:?} to {}",
+            validator, from, to
+        );
 
         self.process_sync_request(ProcessedSyncRequest {
             processed: None,
@@ -770,7 +768,10 @@ impl Mempool {
             .sync_request_throttler
             .should_throttle(&validator, &to)
         {
-            info!("Throttling {} from {}", to.0, validator);
+            debug!(
+                "Throttling SyncReply for DP {} and validator {}",
+                to.0, validator
+            );
             self.metrics
                 .sync_request_received_throttled(&validator, &self.own_lane_id().0);
             throttle = true;
@@ -814,7 +815,10 @@ impl Mempool {
                     next_sync_request: None,
                 });
             }
-            info!("Processing {} from {}", to.0, validator);
+            debug!(
+                "Emitting SyncReply for DP {} and validator {}",
+                to.0, validator
+            );
             // We don't throttle so we fetch the data and send a reply
             let Some(data_proposal): Option<DataProposal> = log_error!(
                 lanes_clone.get_dp_by_hash(&own_id, &to),
@@ -883,13 +887,6 @@ impl Mempool {
                 .or_default();
 
             lane.push(podas);
-
-            let from = self.lanes.lanes_tip.get(lane_id).map(|tip| tip.0.clone());
-
-            if from.as_ref() != Some(data_proposal_hash) {
-                self.send_sync_request(lane_id, from.as_ref(), Some(data_proposal_hash))
-                    .context("When buffering poda")?;
-            }
         }
 
         Ok(())

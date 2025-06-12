@@ -41,7 +41,7 @@ pub struct AutoProver<Contract: Send + Sync + Clone + 'static> {
 #[derive(Default, BorshSerialize, BorshDeserialize)]
 pub struct AutoProverStore<Contract> {
     unsettled_txs: Vec<(BlobTransaction, TxContext)>,
-    state_history: BTreeMap<TxHash, Contract>,
+    state_history: BTreeMap<TxHash, (Contract, bool)>,
     tx_chain: Vec<TxHash>,
     buffered_blobs: Vec<(BlobIndex, BlobTransaction, TxContext)>,
     buffered_blocks_count: u32,
@@ -609,13 +609,22 @@ where
             self.store
                 .buffered_blobs
                 .retain(|(_, t, _)| t.hashed() != *tx);
-            if found.is_some() {
-                self.handle_all_next_blobs_after_failed(pos)?;
+            if let Some((_, success)) = found {
+                if success {
+                    self.handle_all_next_blobs_after_failed(pos)?;
+                } else {
+                    debug!(
+                        cn =% self.ctx.contract_name,
+                        tx_hash =% tx,
+                        "🔀 Tx {} already executed as failed, nothing to re-execute",
+                        tx
+                    );
+                }
             } else {
                 debug!(
                     cn =% self.ctx.contract_name,
                     tx_hash =% tx,
-                    "🔀 No state history found for tx {}, nothing to revert",
+                    "🔀 No state history found for tx {}, nothing to re-execute",
                     tx
                 );
             }
@@ -659,7 +668,7 @@ where
                     "Found previous state from tx {:?}",
                     prev_tx
                 );
-                return Some(contract);
+                return Some(contract.0);
             } else {
                 error!(
                     cn =% self.ctx.contract_name,
@@ -833,7 +842,7 @@ where
                         );
                         self.store
                             .state_history
-                            .insert(tx_hash.clone(), initial_contract);
+                            .insert(tx_hash.clone(), (initial_contract, false));
                     } else {
                         debug!(
                             cn =% self.ctx.contract_name,
@@ -844,7 +853,7 @@ where
                         );
                         self.store
                             .state_history
-                            .insert(tx_hash.clone(), contract.clone());
+                            .insert(tx_hash.clone(), (contract.clone(), true));
                     }
                 }
             }

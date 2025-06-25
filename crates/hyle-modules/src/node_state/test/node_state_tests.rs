@@ -1,10 +1,18 @@
 #![cfg(test)]
 
+use std::path::PathBuf;
+
 use assertables::assert_err;
 use sdk::hyle_model_utils::TimestampMs;
 
-use crate::node_state::test::contract_registration_tests::{
-    make_register_hyli_wallet_identity_tx, make_register_tx,
+use crate::{
+    modules::Module,
+    node_state::{
+        module::NodeStateModule,
+        test::contract_registration_tests::{
+            make_register_hyli_wallet_identity_tx, make_register_tx,
+        },
+    },
 };
 use ::secp256k1::{ecdsa::Signature, rand, Message, PublicKey, Secp256k1, SecretKey};
 use sha2::Digest;
@@ -21,6 +29,20 @@ fn sign_data(secret_key: &SecretKey, expected_data: &[u8]) -> ([u8; 32], [u8; 64
     signature.normalize_s();
 
     (data_hash, signature.serialize_compact())
+}
+
+#[test_log::test(tokio::test)]
+async fn print_node_state_store() {
+    // print working directory
+    println!("Current working directory: {:?}", std::env::current_dir());
+    let path: PathBuf = "./../../data_local/node0/node_state.bin".into();
+    let state: NodeStateStore = NodeStateModule::load_from_disk::<NodeStateStore>(&path)
+        .expect("Failed to load node state store");
+
+    // writes to file the debug view of the state
+    let debug_view = format!("{:#?}", state);
+    let debug_path = PathBuf::from("./../../data_local/node0/node_state_debug.txt");
+    std::fs::write(&debug_path, debug_view).expect("Failed to write node state debug view to file");
 }
 
 #[test_log::test(tokio::test)]

@@ -8,7 +8,7 @@ use crate::{
 use anyhow::{Context, Result};
 pub use axum::Router;
 use axum::{
-    extract::{DefaultBodyLimit, State},
+    extract::{DefaultBodyLimit, Query, State},
     http::{header, Response, StatusCode},
     response::IntoResponse,
     routing::post,
@@ -61,6 +61,7 @@ impl Module for AdminApi {
         let app = ctx.router.merge(
             Router::new()
                 .route("/v1/admin/persist", post(persist))
+                .route("/v1/admin/inspect", post(inspect))
                 .with_state(RouterState {
                     bus: AdminBusClient::new_from_bus(bus.new_handle()).await,
                 }),
@@ -89,6 +90,33 @@ pub async fn persist(State(mut state): State<RouterState>) -> Result<impl IntoRe
         .send(signal::PersistModule {})
         .context("Sending persist signal")?;
     Ok(())
+}
+
+struct JsonState {
+    module_name: String,
+}
+pub async fn inspect(
+    State(state): State<RouterState>,
+    Query(json_state): Query<JsonState>,
+) -> Result<impl IntoResponse, AppError> {
+    tracing::info!("Inspecting modules state");
+    match json_state.module_name.as_str() {
+        "node_state" => {
+            state.bus.await.context("Requesting node state")?;
+
+            Ok(serialize_modules(modules)?)
+        }
+        _ => Err(AppError::NotFound(format!(
+            "Module {} not found",
+            json_state.module_name
+        ))),
+    }
+    let response = serde_json::to_string(&modules).context("Serializing modules")?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(response)
+        .unwrap())
 }
 
 pub struct RouterState {

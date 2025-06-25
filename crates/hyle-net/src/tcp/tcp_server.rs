@@ -322,7 +322,7 @@ where
             }
         });
 
-        let (sender_snd, mut sender_recv) = tokio::sync::mpsc::channel::<TcpMessage>(1000);
+        let (sender_snd, mut sender_recv) = tokio::sync::mpsc::channel::<TcpMessage>(100000);
         let metrics = self.metrics.clone();
 
         let abort_sender_task = logged_task({

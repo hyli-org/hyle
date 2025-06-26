@@ -224,6 +224,20 @@ where
             .map_err(|e| anyhow::anyhow!("Sending msg to client {}: {}", socket_addr, e))
     }
 
+    pub fn try_send(&mut self, socket_addr: String, msg: Res) -> anyhow::Result<()> {
+        debug!("Try Sending msg {:?} to {}", msg, socket_addr);
+        let stream = self
+            .sockets
+            .get_mut(&socket_addr)
+            .context(format!("Retrieving client {}", socket_addr))?;
+
+        let binary_data = to_tcp_message(&msg)?;
+        stream
+            .sender
+            .try_send(binary_data)
+            .map_err(|e| anyhow::anyhow!("Try sending msg to client {}: {}", socket_addr, e))
+    }
+
     pub async fn ping(&mut self, socket_addr: String) -> anyhow::Result<()> {
         let stream = self
             .sockets
@@ -269,6 +283,7 @@ where
                                 hex::encode(bytes.iter().take(10).cloned().collect::<Vec<_>>())
                             );
                             metrics.message_received();
+                            metrics.message_received_bytes(bytes.len() as u64);
                             let _ = pool_sender
                                 .send(Box::new(match borsh::from_slice(&bytes) {
                                     Ok(data) => TcpEvent::Message {
@@ -322,7 +337,7 @@ where
             }
         });
 
-        let (sender_snd, mut sender_recv) = tokio::sync::mpsc::channel::<TcpMessage>(100000);
+        let (sender_snd, mut sender_recv) = tokio::sync::mpsc::channel::<TcpMessage>(10000);
         let metrics = self.metrics.clone();
 
         let abort_sender_task = logged_task({
@@ -338,6 +353,7 @@ where
                         break;
                     };
                     let start = std::time::Instant::now();
+                    let nb_bytes: usize = (&msg_bytes as &Bytes).len();
                     match tokio::time::timeout(Duration::from_secs(10), sender.send(msg_bytes))
                         .await
                     {
@@ -354,7 +370,10 @@ where
                             metrics.message_send_error();
                             break;
                         }
-                        Ok(Ok(_)) => {}
+                        Ok(Ok(_)) => {
+                            metrics.message_emitted();
+                            metrics.message_emitted_bytes(nb_bytes as u64);
+                        }
                     }
                     metrics.message_send_time(start.elapsed().as_secs_f64());
                 }

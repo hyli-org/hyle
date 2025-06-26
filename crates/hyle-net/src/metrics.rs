@@ -148,6 +148,9 @@ impl P2PMetrics {
 pub struct TcpServerMetrics {
     peers: Gauge<u64>,
     message_received: Counter<u64>,
+    message_received_bytes: Counter<u64>,
+    message_emitted: Counter<u64>,
+    message_emitted_bytes: Counter<u64>,
     message_error: Counter<u64>,
     message_closed: Counter<u64>,
     message_send_error: Counter<u64>,
@@ -162,6 +165,13 @@ impl TcpServerMetrics {
         TcpServerMetrics {
             peers: my_meter.u64_gauge("tcp_server_peers").build(),
             message_received: my_meter.u64_counter("tcp_server_message_received").build(),
+            message_received_bytes: my_meter
+                .u64_counter("tcp_server_message_received_bytes")
+                .build(),
+            message_emitted: my_meter.u64_counter("tcp_server_message_emitted").build(),
+            message_emitted_bytes: my_meter
+                .u64_counter("tcp_server_message_emitted_bytes")
+                .build(),
             message_error: my_meter.u64_counter("tcp_server_message_error").build(),
             message_closed: my_meter.u64_counter("tcp_server_message_closed").build(),
             message_send_error: my_meter
@@ -182,6 +192,14 @@ impl TcpServerMetrics {
         self.message_received.add(1, &self.server_name_label);
     }
 
+    pub fn message_emitted(&self) {
+        self.message_emitted.add(1, &self.server_name_label);
+    }
+
+    pub fn message_emitted_bytes(&self, len: u64) {
+        self.message_emitted_bytes.add(len, &self.server_name_label);
+    }
+
     pub fn message_error(&self) {
         self.message_error.add(1, &self.server_name_label);
     }
@@ -197,5 +215,10 @@ impl TcpServerMetrics {
     pub fn message_send_time(&self, duration: f64) {
         self.message_send_time
             .record(duration, &self.server_name_label);
+    }
+
+    pub(crate) fn message_received_bytes(&self, len: u64) {
+        self.message_received_bytes
+            .add(len, &self.server_name_label);
     }
 }

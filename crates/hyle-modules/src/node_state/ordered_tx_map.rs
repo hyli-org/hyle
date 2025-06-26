@@ -1,6 +1,6 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use sdk::*;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::collections::{HashMap, VecDeque};
 
 // struct used to guarantee coherence between the 2 fields
@@ -22,13 +22,9 @@ impl OrderedTxMap {
     /// Returns true if the tx is the next to settle for all the contracts it contains
     pub fn is_next_to_settle(&self, tx_hash: &TxHash) -> bool {
         if let Some(unsettled_blob_tx) = self.map.get(tx_hash) {
-            unsettled_blob_tx.blobs.values().all(|blob_metadata| {
-                if self.get_next_unsettled_tx(&blob_metadata.blob.contract_name) != Some(tx_hash) {
-                    return false;
-                }
-                // The tx is the next to settle for all the contracts it contains
-                true
-            })
+            Self::get_contracts_blocked_by_tx(unsettled_blob_tx)
+                .iter()
+                .all(|contract_name| self.get_next_unsettled_tx(contract_name) == Some(tx_hash))
         } else {
             false
         }
@@ -53,14 +49,14 @@ impl OrderedTxMap {
         let tx = self.map.get_mut(hash);
         match tx {
             Some(tx) => {
-                let is_next_unsettled_tx = tx.blobs.values().all(|blob_metadata| {
-                    if let Some(order) = self.tx_order.get(&blob_metadata.blob.contract_name) {
-                        if let Some(first) = order.front() {
-                            return first == &tx.hash;
-                        }
-                    }
-                    false
-                });
+                // Duplicates logic for efficiency / borrow-checker.
+                let is_next_unsettled_tx =
+                    Self::get_contracts_blocked_by_tx(tx)
+                        .iter()
+                        .all(|contract_name| {
+                            self.tx_order.get(contract_name).and_then(|v| v.front()) == Some(hash)
+                        });
+
                 Some((tx, is_next_unsettled_tx))
             }
             None => None,
@@ -76,7 +72,7 @@ impl OrderedTxMap {
         self.tx_order.get(contract)
     }
 
-    fn get_contracts_blocked_by_tx(&self, tx: &UnsettledBlobTransaction) -> HashSet<ContractName> {
+    pub fn get_contracts_blocked_by_tx(tx: &UnsettledBlobTransaction) -> HashSet<ContractName> {
         // Collect into a hashset for unicity
         let mut contract_names = HashSet::new();
         for blob in tx.blobs.values() {
@@ -95,6 +91,16 @@ impl OrderedTxMap {
         contract_names
     }
 
+    pub fn get_next_txs_blocked_by_tx(&self, tx: &UnsettledBlobTransaction) -> BTreeSet<TxHash> {
+        let mut blocked_txs = BTreeSet::new();
+        for contract in Self::get_contracts_blocked_by_tx(tx) {
+            if let Some(next_tx) = self.get_next_unsettled_tx(&contract) {
+                blocked_txs.insert(next_tx.clone());
+            }
+        }
+        blocked_txs
+    }
+
     /// Returns true if the tx is the next unsettled tx for all the contracts it contains
     /// If the TX was already in the map, this returns None
     pub fn add(&mut self, tx: UnsettledBlobTransaction) -> Option<bool> {
@@ -104,7 +110,7 @@ impl OrderedTxMap {
         let mut is_next = true;
 
         // Collect into a hashset for unicity
-        let contract_names = self.get_contracts_blocked_by_tx(&tx);
+        let contract_names = Self::get_contracts_blocked_by_tx(&tx);
         for contract in contract_names {
             is_next = match self.tx_order.get_mut(&contract) {
                 Some(vec) => {
@@ -129,7 +135,7 @@ impl OrderedTxMap {
     pub fn remove(&mut self, hash: &TxHash) -> Option<UnsettledBlobTransaction> {
         self.map.remove(hash).inspect(|tx| {
             // Remove the tx from the tx_order
-            let contract_names = self.get_contracts_blocked_by_tx(tx);
+            let contract_names = Self::get_contracts_blocked_by_tx(tx);
             for contract_name in contract_names {
                 if let Some(vec) = self.tx_order.get_mut(&contract_name) {
                     vec.retain(|h| h != &tx.hash);

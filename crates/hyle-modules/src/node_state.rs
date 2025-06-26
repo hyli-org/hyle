@@ -10,7 +10,7 @@ use ordered_tx_map::OrderedTxMap;
 use sdk::verifiers::{NativeVerifiers, NATIVE_VERIFIERS_CONTRACT_LIST};
 use sdk::*;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use timeouts::Timeouts;
 use tracing::{debug, error, info, trace};
 
@@ -887,15 +887,9 @@ impl NodeState {
         // Transaction was settled, update our state.
 
         // Note all the TXs that we might want to try and settle next
-        let mut next_txs_to_try_and_settle = settled_tx
-            .blobs
-            .iter()
-            .filter_map(|(_, blob_metadata)| {
-                self.unsettled_transactions
-                    .get_next_unsettled_tx(&blob_metadata.blob.contract_name)
-                    .cloned()
-            })
-            .collect::<BTreeSet<_>>();
+        let mut next_txs_to_try_and_settle = self
+            .unsettled_transactions
+            .get_next_txs_blocked_by_tx(&settled_tx);
 
         #[allow(clippy::unwrap_used, reason = "must exist because of above checks")]
         let Ok(SettlementResult {
@@ -967,6 +961,8 @@ impl NodeState {
                     debug!("✏️ Delete {} contract", contract_name);
                     self.contracts.remove(&contract_name);
 
+                    let mut potentially_blocked_contracts = HashSet::new();
+
                     // Time-out all transactions for this contract
                     while let Some(tx_hash) = self
                         .unsettled_transactions
@@ -975,6 +971,9 @@ impl NodeState {
                     {
                         if let Some(popped_tx) = self.unsettled_transactions.remove(&tx_hash) {
                             info!("⏳ Timeout tx {} (from contract deletion)", &tx_hash);
+
+                            potentially_blocked_contracts
+                                .extend(OrderedTxMap::get_contracts_blocked_by_tx(&popped_tx));
                             block_under_construction
                                 .transactions_events
                                 .entry(tx_hash.clone())
@@ -986,6 +985,14 @@ impl NodeState {
                             block_under_construction
                                 .lane_ids
                                 .insert(tx_hash, popped_tx.tx_context.lane_id);
+                        }
+                    }
+
+                    for contract in potentially_blocked_contracts {
+                        if let Some(tx_hash) =
+                            self.unsettled_transactions.get_next_unsettled_tx(&contract)
+                        {
+                            next_txs_to_try_and_settle.insert(tx_hash.clone());
                         }
                     }
 
@@ -1436,15 +1443,8 @@ impl NodeState {
                 block_under_construction.lane_ids.insert(hash, lane_id);
 
                 // Attempt to settle following transactions
-                let blob_tx_to_try_and_settle: BTreeSet<TxHash> = tx
-                    .blobs
-                    .into_values()
-                    .filter_map(|b| {
-                        self.unsettled_transactions
-                            .get_next_unsettled_tx(&b.blob.contract_name)
-                    })
-                    .cloned()
-                    .collect();
+                let blob_tx_to_try_and_settle: BTreeSet<TxHash> =
+                    self.unsettled_transactions.get_next_txs_blocked_by_tx(&tx);
 
                 // Then try to settle transactions when we can.
                 let next_unsettled_txs =

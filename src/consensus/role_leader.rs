@@ -35,7 +35,7 @@ impl Consensus {
     pub(super) async fn start_round(
         &mut self,
         current_timestamp: TimestampMs,
-        may_delay: bool,
+        may_delay: Option<TimestampMs>,
     ) -> Result<()> {
         if !matches!(self.bft_round_state.leader.step, Step::StartNewSlot) {
             bail!(
@@ -85,6 +85,9 @@ impl Consensus {
                 Ok(Ok(cut)) => {
                     // If the cut is the same as before (and we didn't time out), then check if we should delay.
                     if may_delay
+                        .as_ref()
+                        .map(|ts| ts > &current_timestamp)
+                        .unwrap_or(true)
                         && !matches!(ticket, Ticket::TimeoutQC(..))
                         && cut == self.bft_round_state.parent_cut
                     {
@@ -94,10 +97,17 @@ impl Consensus {
                             broadcast::Sender<ConsensusCommand>,
                         >::get(&self.bus)
                         .clone();
-                        let interval = self.config.consensus.slot_duration;
+                        let max_delay = may_delay.unwrap_or_else(|| {
+                            current_timestamp.clone() + self.config.consensus.slot_duration
+                        });
+                        let sleep_for = std::cmp::min(
+                            max_delay.clone() - current_timestamp,
+                            Duration::from_millis(500),
+                        );
                         tokio::spawn(async move {
-                            tokio::time::sleep(interval).await;
-                            let _ = command_sender.send(ConsensusCommand::StartNewSlot(false));
+                            tokio::time::sleep(sleep_for).await;
+                            let _ = command_sender
+                                .send(ConsensusCommand::StartNewSlot(Some(max_delay)));
                         });
                         return Ok(());
                     }

@@ -975,3 +975,130 @@ async fn test_custom_timeout_then_upgrade_with_none() {
         Some(BlockHeight(8) + another_custom_timeout)
     );
 }
+
+#[test_log::test(tokio::test)]
+async fn test_pending_tx_then_contract_upgrade_and_settlement_order() {
+    // 1. Register contract via hyle
+    let mut state = new_node_state().await;
+    let contract_name = ContractName::new("foo");
+    let register_1 = make_register_tx("hyle@hyle".into(), "hyle".into(), contract_name.clone());
+    state.craft_block_and_handle(1, vec![register_1.clone().into()]);
+    assert!(state.contracts.contains_key(&contract_name));
+
+    // 2. Send a pending TX to that contract (TX2)
+    let tx2 = BlobTransaction::new(
+        Identity::new("user@foo"),
+        vec![Blob {
+            contract_name: contract_name.clone(),
+            data: BlobData(vec![1, 2, 3]),
+        }],
+    );
+    let tx2_hash = tx2.hashed();
+    state.craft_block_and_handle(2, vec![tx2.clone().into()]);
+    assert!(state.unsettled_transactions.get(&tx2_hash).is_some());
+
+    // 3. Register the same contract again via hyle (TX3)
+    let register_2 = make_register_tx("hyle@hyle".into(), "hyle".into(), contract_name.clone());
+    let register_2_hash = register_2.hashed();
+    state.craft_block_and_handle(3, vec![register_2.clone().into()]);
+
+    // 4. Send another TX to the contract (TX4)
+    let tx4 = BlobTransaction::new(
+        Identity::new("user2@foo"),
+        vec![Blob {
+            contract_name: contract_name.clone(),
+            data: BlobData(vec![4, 5, 6]),
+        }],
+    );
+    let tx4_hash = tx4.hashed();
+    state.craft_block_and_handle(4, vec![tx4.clone().into()]);
+    assert!(state.unsettled_transactions.get(&tx4_hash).is_some());
+
+    // 5. Submit the proof for TX4
+    let mut output4 = make_hyle_output_with_state(tx4.clone(), BlobIndex(0), &[4, 5, 6], &[1]);
+    let proof4 = new_proof_tx(&contract_name, &output4, &tx4_hash);
+    let block5 = state.craft_block_and_handle(5, vec![proof4.clone().into()]);
+    // TX4 should not be settled yet, because TX2 is still pending
+    assert!(state.unsettled_transactions.get(&tx4_hash).is_some());
+
+    // 6. Submit the proof for TX2
+    let mut output2 = make_hyle_output(tx2.clone(), BlobIndex(0));
+    let proof2 = new_proof_tx(&contract_name, &output2, &tx2_hash);
+    let block6 = state.craft_block_and_handle(6, vec![proof2.clone().into()]);
+
+    // 7. Now TX3 (the duplicate register) should have failed, and TX4 should be settled immediately
+    // Check block5: TX3 should be in failed_txs
+    assert!(block6.failed_txs.contains(&register_2_hash));
+    // Check block6: TX4 should be settled (successful_txs)
+    assert!(block6.successful_txs.contains(&tx4_hash));
+    // TX2 should also be settled
+    assert!(block6.successful_txs.contains(&tx2_hash));
+    // Both TX2 and TX4 should be removed from unsettled
+    assert!(state.unsettled_transactions.get(&tx2_hash).is_none());
+    assert!(state.unsettled_transactions.get(&tx4_hash).is_none());
+}
+
+#[test_log::test(tokio::test)]
+async fn domino_settlement_after_contract_delete() {
+    // Register contracts 'a' and 'b' via crafted blocks
+    let mut state = new_node_state().await;
+    state.contracts.insert(
+        ContractName::new("wallet"),
+        Contract {
+            name: ContractName::new("wallet"),
+            program_id: ProgramId(vec![]),
+            state: StateCommitment(vec![0, 1, 2, 3]),
+            verifier: Verifier("test".into()),
+            timeout_window: TimeoutWindow::Timeout(BlockHeight(100)),
+        },
+    );
+    let a = ContractName::new("a");
+    let b = ContractName::new("b");
+    let register_a = make_register_contract_tx(a.clone());
+    let register_b = make_register_contract_tx(b.clone());
+    state.craft_block_and_handle(
+        1,
+        vec![register_a.clone().into(), register_b.clone().into()],
+    );
+
+    // Send a transaction to B
+    let identity_b = Identity::new("user@b");
+    let tx_b = BlobTransaction::new(identity_b.clone(), vec![new_blob("b")]);
+    let tx_b_id = tx_b.hashed();
+    state.craft_block_and_handle(2, vec![tx_b.clone().into()]);
+
+    // Delete B via hyle (as a tx)
+    let delete_b = make_delete_tx_with_hyli(ContractName::new("hyle"), b.clone());
+    // And proof for 'wallet'
+    let hyle_output_wallet = make_hyle_output(delete_b.clone(), BlobIndex(0));
+    let proof_wallet = new_proof_tx(
+        &ContractName::new("wallet"),
+        &hyle_output_wallet,
+        &delete_b.hashed(),
+    );
+    state.craft_block_and_handle(3, vec![delete_b.clone().into(), proof_wallet.into()]);
+
+    // Send a transaction with blobs for both B and A
+    let identity_ab = Identity::new("user@a");
+    let tx_ab = BlobTransaction::new(identity_ab.clone(), vec![new_blob("b"), new_blob("a")]);
+    let tx_ab_id = tx_ab.hashed();
+    state.craft_block_and_handle(4, vec![tx_ab.clone().into()]);
+
+    // Send another transaction for just A
+    let identity_a = Identity::new("user@a");
+    let tx_a = BlobTransaction::new(identity_a.clone(), vec![new_blob("a")]);
+    let tx_a_id = tx_a.hashed();
+    state.craft_block_and_handle(5, vec![tx_a.clone().into()]);
+
+    // Send proof to make it ready to settle
+    let hyle_output_a = make_hyle_output(tx_a.clone(), BlobIndex(0));
+    let proof_a = new_proof_tx(&a, &hyle_output_a, &tx_a_id);
+    let block_a = state.craft_block_and_handle(6, vec![proof_a.into()]);
+
+    // Now send the proof for the first transaction (to B)
+    let hyle_output_b = make_hyle_output(tx_b.clone(), BlobIndex(0));
+    let proof_b = new_proof_tx(&b, &hyle_output_b, &tx_b_id);
+    let block_b = state.craft_block_and_handle(7, vec![proof_b.into()]);
+    // This should domino through and settle the tx_ab and tx_a if not already settled
+    assert!(block_b.successful_txs.contains(&tx_a_id));
+}

@@ -126,7 +126,12 @@ where
             node_p2p_public_address,
             node_da_public_address,
             current_height: 0,
-            tcp_server: TcpServer::start_with_opts(port, max_frame_length, &node_id).await?,
+            tcp_server: TcpServer::start_with_opts(
+                port,
+                max_frame_length,
+                format!("P2P-{}", node_id).as_str(),
+            )
+            .await?,
             peers: HashMap::new(),
             handshake_clients_tasks: JoinSet::new(),
             peers_ping_ticker: tokio::time::interval(std::time::Duration::from_secs(2)),

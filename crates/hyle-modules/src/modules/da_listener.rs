@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use sdk::{BlockHeight, Hashed, MempoolStatusEvent, SignedBlock};
+use tokio::task::yield_now;
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -232,6 +233,7 @@ impl DAListener {
                         }
                     }
                 }
+                yield_now().await; // Yield to allow other tasks to run
             }
             // Sort blocks by block_height (numeric order)
             blocks.sort_by_key(|b| b.0.consensus_proposal.slot);
@@ -255,8 +257,12 @@ impl DAListener {
                 frame = client.recv() => {
                     if let Some(streamed_signed_block) = frame {
                         let _ = log_error!(self.processing_next_frame(streamed_signed_block).await, "Consuming da stream");
-                        client.ping().await?;
+                        if let Err(e) = client.ping().await {
+                            warn!("Ping failed: {}. Restarting client...", e);
+                            client = self.start_client(self.node_state.current_height + 1).await?;
+                        }
                     } else {
+                        warn!("DA stream connection lost. Reconnecting...");
                         client = self.start_client(self.node_state.current_height + 1).await?;
                     }
                 }

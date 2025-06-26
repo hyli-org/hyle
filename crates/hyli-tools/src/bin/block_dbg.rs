@@ -10,7 +10,12 @@ use crossterm::{
 };
 use hyle_contract_sdk::{Block, NodeStateEvent, TransactionData, TxId, api::NodeInfo};
 use hyle_contract_sdk::{BlockHeight, SignedBlock};
-use hyle_modules::modules::prover::{AutoProver, AutoProverCtx};
+use hyle_model::DataEvent;
+use hyle_modules::modules::{
+    da_listener::DAListenerConf,
+    prover::{AutoProver, AutoProverCtx},
+    signed_da_listener::SignedDAListener,
+};
 use hyle_modules::{
     bus::{SharedMessageBus, metrics::BusMetrics},
     module_bus_client, module_handle_messages,
@@ -20,9 +25,7 @@ use hyle_modules::{
         rest::{ApiDoc, RestApi, RestApiRunContext, Router},
     },
     node_state::NodeState,
-    utils::da_codec::DataAvailabilityEvent,
 };
-use hyli_tools::signed_da_listener::DAListenerConf;
 use ratatui::{
     prelude::*,
     widgets::{Block as TuiBlock, *},
@@ -165,10 +168,11 @@ async fn main() -> Result<()> {
 
     if !has_blocks {
         handler
-            .build_module::<hyli_tools::signed_da_listener::DAListener>(DAListenerConf {
+            .build_module::<SignedDAListener>(DAListenerConf {
                 data_directory: PathBuf::from("data"),
                 da_read_from: "localhost:4141".to_string(),
                 start_block: Some(BlockHeight(0)),
+                timeout_client_secs: 10,
             })
             .await?;
     } else {
@@ -254,7 +258,7 @@ async fn main() -> Result<()> {
 module_bus_client! {
 struct DumpBusClient {
     sender(NodeStateEvent),
-    receiver(DataAvailabilityEvent),
+    receiver(DataEvent),
 }
 }
 // Purpose: dump all blocks to a file in a specific folder
@@ -363,9 +367,9 @@ impl BlockDbg {
 
         module_handle_messages! {
             on_self self,
-            listen<DataAvailabilityEvent> event => {
+            listen<DataEvent> event => {
                 match event {
-                    DataAvailabilityEvent::SignedBlock(block) => {
+                    DataEvent::OrderedSignedBlock(block) => {
                         tracing::info!("Received block: {:?}, saving it to {:?}", block, self.outfolder);
                         let txs = block.count_txs();
                         ui_state.blocks.push((block.clone(), txs));
@@ -377,9 +381,6 @@ impl BlockDbg {
                             .context("Failed to create block file")?;
                         borsh::to_writer(&mut file, &(block, txs))
                             .context("Failed to serialize block")?;
-                    }
-                    _ => {
-                        /* ignore */
                     }
                 }
             },

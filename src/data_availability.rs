@@ -18,7 +18,10 @@ use hyle_modules::{
 };
 use hyle_net::tcp::TcpEvent;
 use rand::seq::SliceRandom;
-use tokio::time::{sleep_until, Instant};
+use tokio::{
+    task::JoinSet,
+    time::{sleep_until, Instant},
+};
 
 use crate::{
     bus::BusClientSender,
@@ -74,14 +77,20 @@ impl DataAvailability {
         let mut server: DaTcpServer = DataAvailabilityServer::start_with_opts(
             self.config.da_server_port,
             Some(self.config.da_max_frame_length),
-            "DAServer",
+            format!("DAServer-{}", self.config.id.clone()).as_str(),
         )
         .await?;
 
         let (catchup_block_sender, mut catchup_block_receiver) =
             tokio::sync::mpsc::channel::<SignedBlock>(100);
 
-        let (catchup_sender, mut catchup_receiver) = tokio::sync::mpsc::channel(100);
+        // Used to send blocks to clients (indexers/peers)
+        // // This is a JoinSet of tuples containing:
+        // // - A vector of block hashes to send
+        // // - The peer IP address to send the blocks to
+        // // - The number of retries for sending the blocks
+        let mut catchup_joinset: JoinSet<(Vec<ConsensusProposalHash>, String, usize)> =
+            tokio::task::JoinSet::new();
 
         let mut peers = vec![];
         let mut catchup_task_checker_ticker =
@@ -159,13 +168,13 @@ impl DataAvailability {
 
             Some(tcp_event) = server.listen_next() => {
                 if let TcpEvent::Message { dest, data } = tcp_event {
-                    _ = self.start_streaming_to_peer(data.0, catchup_sender.clone(), &dest).await;
+                    _ = self.start_streaming_to_peer(data.0, &mut catchup_joinset, &dest).await;
                 }
             }
 
             // Send one block to a peer as part of "catchup",
             // once we have sent all blocks the peer is presumably synchronised.
-            Some((mut block_hashes, peer_ip)) = catchup_receiver.recv() => {
+            Some(Ok((mut block_hashes, peer_ip, retries))) = catchup_joinset.join_next() => {
 
                 #[cfg(test)]
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -178,13 +187,22 @@ impl DataAvailability {
                     {
                         // Errors will be handled when sending new blocks, ignore here.
                         if server
-                            .send(peer_ip.clone(), DataAvailabilityEvent::SignedBlock(signed_block))
-                            .await.is_ok() {
-                            let _ = catchup_sender.send((block_hashes, peer_ip)).await;
+                        .try_send(peer_ip.clone(), DataAvailabilityEvent::SignedBlock(signed_block))
+                        .is_ok() {
+                            catchup_joinset.spawn(async move {
+                                (block_hashes, peer_ip, retries + 1)
+                            });
                         }
-                        else {
+                        else if retries > 10 {
                             warn!("Failed to send block {} to peer {}", &hash, &peer_ip);
                             server.drop_peer_stream(peer_ip);
+                        } else {
+                            // Retry sending the block
+                            block_hashes.push(hash);
+                            catchup_joinset.spawn(async move {
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                (block_hashes, peer_ip, retries + 1)
+                            });
                         }
                     }
                 }
@@ -312,11 +330,10 @@ impl DataAvailability {
         // Iterative loop to avoid stack overflows
         while let Some(first_buffered) = self.buffered_signed_blocks.first() {
             if first_buffered.parent_hash() != &last_block_hash {
-                warn!(
-
-                    "Stopping processing buffered blocks because block parent hash {} does not match last block hash {}",
+                debug!(
+                    "Stopping processing buffered blocks - hole in the buffer after {} (found parent hash {})",
+                    last_block_hash,
                     first_buffered.parent_hash(),
-                    last_block_hash
                 );
                 break;
             }
@@ -406,7 +423,7 @@ impl DataAvailability {
     async fn start_streaming_to_peer(
         &mut self,
         start_height: BlockHeight,
-        catchup_sender: tokio::sync::mpsc::Sender<(Vec<ConsensusProposalHash>, String)>,
+        catchup_joinset: &mut JoinSet<(Vec<ConsensusProposalHash>, String, usize)>,
         peer_ip: &str,
     ) -> Result<()> {
         // Finally, stream past blocks as required.
@@ -427,9 +444,9 @@ impl DataAvailability {
             .collect();
         processed_block_hashes.reverse();
 
-        catchup_sender
-            .send((processed_block_hashes, peer_ip.to_string()))
-            .await?;
+        let peer_ip = peer_ip.to_string();
+
+        catchup_joinset.spawn(async move { (processed_block_hashes, peer_ip, 0) });
 
         Ok(())
     }
@@ -451,6 +468,13 @@ impl DataAvailability {
             .context("Error occurred setting up the DA listener")?;
 
         client.send(DataAvailabilityRequest(start)).await?;
+
+        if let Some(task) = self.catchup_task.take() {
+            if !task.is_finished() {
+                warn!("Catchup task was already running, aborting it.");
+                task.abort();
+            }
+        }
 
         self.catchup_task = Some(tokio::spawn(async move {
             let timeout_duration = Duration::from_secs(10);

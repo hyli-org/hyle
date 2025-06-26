@@ -53,7 +53,7 @@ pub use network::*;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum ConsensusCommand {
     TimeoutTick,
-    StartNewSlot(bool),
+    StartNewSlot(Option<TimestampMs>), // If none, may delay, if some, may delay up to that timestamp
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, BorshSerialize, BorshDeserialize)]
@@ -505,7 +505,7 @@ impl Consensus {
             // Setup our ticket for the next round
             // Send Prepare message to all validators
             self.bft_round_state.leader.pending_ticket = Some(ticket);
-            self.bus.send(ConsensusCommand::StartNewSlot(true))?;
+            self.bus.send(ConsensusCommand::StartNewSlot(None))?;
             Ok(())
         } else if self.is_part_of_consensus(self.crypto.validator_pubkey()) {
             Ok(())
@@ -756,7 +756,7 @@ impl Consensus {
 
         if self.is_round_leader() {
             self.bft_round_state.leader.pending_ticket = Some(Ticket::Genesis);
-            self.bus.send(ConsensusCommand::StartNewSlot(true))?;
+            self.bus.send(ConsensusCommand::StartNewSlot(None))?;
         }
         self.start().await
     }
@@ -1116,14 +1116,14 @@ pub mod test {
 
         pub async fn start_round(&mut self) {
             self.consensus
-                .start_round(TimestampMsClock::now(), false)
+                .start_round(TimestampMsClock::now(), Some(TimestampMs(0)))
                 .await
                 .expect("Failed to start slot");
         }
 
         pub async fn start_round_at(&mut self, current_timestamp: TimestampMs) {
             self.consensus
-                .start_round(current_timestamp, false)
+                .start_round(current_timestamp, Some(TimestampMs(0)))
                 .await
                 .expect("Failed to start slot");
         }

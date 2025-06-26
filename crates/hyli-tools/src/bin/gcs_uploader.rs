@@ -6,12 +6,11 @@ use clap::{Parser, command};
 use hyle_contract_sdk::BlockHeight;
 use hyle_modules::{
     bus::{SharedMessageBus, metrics::BusMetrics},
-    modules::ModulesHandler,
+    modules::{ModulesHandler, da_listener::DAListenerConf, signed_da_listener::SignedDAListener},
     utils::logger::setup_tracing,
 };
 use hyli_tools::gcs_block_uploader::GcsBlockUploaderCtx;
 use hyli_tools::gcs_block_uploader::{Conf, GcsBlockUploader};
-use hyli_tools::signed_da_listener::DAListenerConf;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -39,10 +38,11 @@ async fn main() -> Result<()> {
     let mut handler = ModulesHandler::new(&bus).await;
 
     handler
-        .build_module::<hyli_tools::signed_da_listener::DAListener>(DAListenerConf {
+        .build_module::<SignedDAListener>(DAListenerConf {
             data_directory: config.data_directory.clone(),
             da_read_from: config.da_read_from.clone(),
             start_block: Some(BlockHeight(0)),
+            timeout_client_secs: 10,
         })
         .await?;
 

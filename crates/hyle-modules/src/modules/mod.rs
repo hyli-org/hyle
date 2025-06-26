@@ -27,6 +27,7 @@ pub mod da_listener;
 pub mod prover;
 pub mod prover_metrics;
 pub mod rest;
+pub mod signed_da_listener;
 pub mod websocket;
 
 #[derive(Default)]

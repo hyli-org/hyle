@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use anyhow::Result;
 use google_cloud_storage::client::{Client, ClientConfig};
 use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest};
+use hyle_model::DataEvent;
 use hyle_modules::{
     bus::SharedMessageBus,
     modules::{Module, module_bus_client},
-    utils::da_codec::DataAvailabilityEvent,
 };
 use hyle_modules::{log_error, module_handle_messages};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 module_bus_client! {
     #[derive(Debug)]
     struct GcsUploaderBusClient {
-        receiver(DataAvailabilityEvent),
+        receiver(DataEvent),
     }
 }
 
@@ -105,59 +105,57 @@ impl GcsBlockUploader {
     pub async fn start(&mut self) -> Result<()> {
         module_handle_messages! {
             on_self self,
-            listen<DataAvailabilityEvent> event => {
+            listen<DataEvent> event => {
                 self.handle_data_availability_event(event).await?;
             }
         };
         Ok(())
     }
 
-    async fn handle_data_availability_event(&mut self, event: DataAvailabilityEvent) -> Result<()> {
-        if let DataAvailabilityEvent::SignedBlock(block) = event {
-            let block_height = block.height().0;
-            let block_timestamp = block.consensus_proposal.timestamp.0;
-            if block_height == 0 {
-                self.testnet_genesis_timestamp = Some(block_timestamp);
-                tracing::info!("Testnet genesis timestamp set to {}", block_timestamp);
-            }
+    async fn handle_data_availability_event(&mut self, event: DataEvent) -> Result<()> {
+        let DataEvent::OrderedSignedBlock(block) = event;
+        let block_height = block.height().0;
+        let block_timestamp = block.consensus_proposal.timestamp.0;
+        if block_height == 0 {
+            self.testnet_genesis_timestamp = Some(block_timestamp);
+            tracing::info!("Testnet genesis timestamp set to {}", block_timestamp);
+        }
 
-            let prefix = &self.config.gcs_prefix;
-            let object_name = format!(
-                "{}/{}/block_{}.bin",
-                prefix,
-                self.testnet_genesis_timestamp.expect("must be set"),
-                block_height
-            );
-            let data = borsh::to_vec(&block)?;
-            let req = UploadObjectRequest {
-                bucket: self.config.gcs_bucket.clone(),
-                generation: Some(0), // 0 means - don't overwrite existing objects
-                ..Default::default()
-            };
-            let media = Media::new(object_name.clone());
-            let upload_type =
-                google_cloud_storage::http::objects::upload::UploadType::Simple(media);
-            // Log, but ignore errors - could be that we already dumped this, or some other thing - we'll do our best to store everything.
-            match self
-                .gcs_client
-                .upload_object(&req, data, &upload_type)
-                .await
-            {
-                Ok(_) => {
-                    tracing::info!(
-                        "Successfully uploaded block {} to GCS bucket {}",
-                        block_height,
-                        self.config.gcs_bucket
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to upload block {} to GCS bucket {}: {}",
-                        block_height,
-                        self.config.gcs_bucket,
-                        e
-                    );
-                }
+        let prefix = &self.config.gcs_prefix;
+        let object_name = format!(
+            "{}/{}/block_{}.bin",
+            prefix,
+            self.testnet_genesis_timestamp.expect("must be set"),
+            block_height
+        );
+        let data = borsh::to_vec(&block)?;
+        let req = UploadObjectRequest {
+            bucket: self.config.gcs_bucket.clone(),
+            generation: Some(0), // 0 means - don't overwrite existing objects
+            ..Default::default()
+        };
+        let media = Media::new(object_name.clone());
+        let upload_type = google_cloud_storage::http::objects::upload::UploadType::Simple(media);
+        // Log, but ignore errors - could be that we already dumped this, or some other thing - we'll do our best to store everything.
+        match self
+            .gcs_client
+            .upload_object(&req, data, &upload_type)
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(
+                    "Successfully uploaded block {} to GCS bucket {}",
+                    block_height,
+                    self.config.gcs_bucket
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to upload block {} to GCS bucket {}: {}",
+                    block_height,
+                    self.config.gcs_bucket,
+                    e
+                );
             }
         }
         Ok(())

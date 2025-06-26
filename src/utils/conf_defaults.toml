@@ -49,8 +49,9 @@ ping_interval = 10
 
 
 [consensus]
-# Time between blocks (will change in the future)
+# Time to wait before producing a new block when no new transactions are received.
 slot_duration = 1000
+# Time to wait before sending a timeout message for the slot/view.
 timeout_after = 5000
 # Whether to check timestamp consistency of produced blocks
 timestamp_checks = "Monotonic"

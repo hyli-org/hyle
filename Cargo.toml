@@ -206,12 +206,11 @@ nonreproducible = ["hyle-contracts/nonreproducible"]
 node_local_proving = ["risc0-zkvm/client"]
 
 [profile.release]
-lto = "thin"
+# Turn off LTO, takes too long
+lto = "off"
 incremental = true
 
 [profile.profiling]
-# Turn off LTO, takes too long
-lto = "off"
 inherits = "release"
 debug = true         # Keep debug info for profiling
 strip = "none"

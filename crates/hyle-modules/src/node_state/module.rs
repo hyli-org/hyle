@@ -46,8 +46,12 @@ pub struct NodeStateBusClient {
     receiver(Query<QueryUnsettledTxCount, u64>),
     receiver(Query<QueryBlockHeight , BlockHeight>),
     receiver(Query<QueryUnsettledTx, UnsettledBlobTransaction>),
+    receiver(Query<QueryNodeState, NodeStateStore>),
 }
 }
+
+#[derive(Clone)]
+pub struct QueryNodeState {}
 
 pub struct NodeStateCtx {
     pub node_id: String,
@@ -118,6 +122,9 @@ impl Module for NodeStateModule {
                     Some(tx) => Ok(tx.clone()),
                     None => Err(anyhow::anyhow!("Transaction not found")),
                 }
+            }
+            command_response<QueryNodeState, NodeStateStore> _ => {
+                Ok(self.inner.store.clone())
             }
             listen<DataEvent> block => {
                 match block {

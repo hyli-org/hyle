@@ -138,7 +138,7 @@ impl std::ops::DerefMut for NodeState {
 /// NodeState manages the flattened, up-to-date state of the chain.
 /// It processes raw transactions and outputs more structured data for indexers.
 /// See also: NodeStateModule for the actual module implementation.
-#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Debug, Clone)]
 pub struct NodeStateStore {
     timeouts: Timeouts,
     pub current_height: BlockHeight,

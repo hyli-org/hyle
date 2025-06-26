@@ -1,10 +1,11 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use sdk::*;
+use serde::Serialize;
 use std::collections::{BTreeSet, HashSet};
 use std::collections::{HashMap, VecDeque};
 
 // struct used to guarantee coherence between the 2 fields
-#[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize)]
+#[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize, Serialize)]
 pub struct OrderedTxMap {
     map: HashMap<TxHash, UnsettledBlobTransaction>,
     tx_order: HashMap<ContractName, VecDeque<TxHash>>,

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::bus::command_response::{CmdRespClient, Query};
+use crate::bus::command_response::CmdRespClient;
 use crate::bus::BusClientSender;
 use crate::consensus::ConfirmAckMarker;
 use crate::consensus::{CommittedConsensusProposal, ConsensusEvent, QueryConsensusInfo};
@@ -11,6 +11,7 @@ use crate::utils::conf::SharedConf;
 use anyhow::Result;
 use borsh::{BorshDeserialize, BorshSerialize};
 use hyle_crypto::SharedBlstCrypto;
+use hyle_modules::bus::command_response::Query;
 use hyle_modules::bus::SharedMessageBus;
 use hyle_modules::modules::module_bus_client;
 use hyle_modules::modules::Module;

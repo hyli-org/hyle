@@ -35,4 +35,24 @@ jobs:
           prerelease: "${{ contains(github.ref_name, 'rc') }}"
           body_path: RELEASE_NOTES.md
 
-
+  publish-crates:
+    name: Publish crates
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain:
+          - stable
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
+      - name: Publish crates 
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo publish -p hyle-model
+          cargo publish -p hyle-bonsai-runner
+          cargo publish -p hyle-contract-sdk
+          cargo publish -p hyle-client-sdk
+          cargo publish -p hyle-hyllar
+          cargo publish -p hyle-hydentity
+          cargo publish -p hyle-amm

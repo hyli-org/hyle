@@ -12,6 +12,9 @@ rust-version = { workspace = true }
 name = "bonsai-runner"
 required-features = ["bonsai-runner"]
 
+[[bin]]
+name = "boundless-parse"
+
 [dependencies]
 anyhow = "1.0.98"
 tracing = "0.1"
@@ -19,7 +22,8 @@ hex = "0.4.3"
 borsh = "1.5.6"
 
 bonsai-sdk = { version = "1.2.4", features = ["non_blocking"] }
-boundless-market = "0.7.0"
+boundless-market = "0.10.0"
+risc0-ethereum-contracts = { version = "2.2" }
 hyle-net = { workspace = true }
 risc0-zkvm = { version = "2.1" }
 bytemuck = "1.23.1"

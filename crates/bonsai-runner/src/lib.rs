@@ -1,19 +1,26 @@
-use std::{str::FromStr, time::Duration};
+use std::{
+    str::FromStr,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use bonsai_sdk::non_blocking::Client;
 use borsh::BorshSerialize;
 use boundless_market::{
     alloy::{
-        primitives::utils::parse_ether, signers::local::PrivateKeySigner,
+        primitives::{utils::parse_ether, Bytes, Uint},
+        signers::local::PrivateKeySigner,
         transports::http::reqwest::Url,
     },
     client::ClientBuilder,
-    contracts::{Input, Offer, Predicate, ProofRequestBuilder, Requirements},
-    input::InputBuilder,
-    storage::{BuiltinStorageProvider, StorageProvider},
+    contracts::Offer,
+    deployments::NamedChain,
+    storage::{storage_provider_from_env, StorageProvider},
+    Deployment, GuestEnvBuilder,
 };
-use risc0_zkvm::{compute_image_id, default_executor, sha::Digestible, Receipt};
+use risc0_zkvm::{
+    compute_image_id, default_executor, sha::Digestible, Digest, Receipt, ReceiptClaim,
+};
 use tracing::info;
 
 #[allow(dead_code)]
@@ -26,12 +33,26 @@ pub fn as_input_data<T: BorshSerialize>(data: &T) -> Result<Vec<u8>> {
 }
 
 pub async fn run_boundless(elf: &[u8], input_data: Vec<u8>) -> Result<Receipt> {
+    let chain_id = std::env::var("BOUNDLESS_CHAIN_ID").unwrap_or("11155111".to_string());
     let offchain = std::env::var("BOUNDLESS_OFFCHAIN").unwrap_or_default() == "true";
-    let boundless_market_address = std::env::var("BOUNDLESS_MARKET_ADDRESS").unwrap_or_default();
-    let order_stream_url = std::env::var("BOUNDLESS_ORDER_STREAM_URL").ok();
     let wallet_private_key = std::env::var("BOUNDLESS_WALLET_PRIVATE_KEY").unwrap_or_default();
     let rpc_url = std::env::var("BOUNDLESS_RPC_URL").unwrap_or_default();
-    let set_verifier_addr = std::env::var("BOUNDLESS_SET_VERIFIER_ADDRESS").ok();
+
+    let min_price_per_mcycle =
+        std::env::var("BOUNDLESS_MIN_PRICE_PER_MCYCLE").unwrap_or_else(|_| "0.000001".to_string());
+    let max_price_per_mcycle =
+        std::env::var("BOUNDLESS_MAX_PRICE_PER_MCYCLE").unwrap_or_else(|_| "0.000005".to_string());
+    let timeout = std::env::var("BOUNDLESS_TIMEOUT").unwrap_or_else(|_| "120".to_string());
+    let lock_timeout = std::env::var("BOUNDLESS_LOCK_TIMEOUT").unwrap_or_else(|_| "60".to_string());
+    let ramp_up_period =
+        std::env::var("BOUNDLESS_RAMP_UP_PERIOD").unwrap_or_else(|_| "15".to_string());
+
+    let chain_id: u64 = chain_id.parse()?;
+    let min_price_per_mcycle = parse_ether(&min_price_per_mcycle)?;
+    let max_price_per_mcycle = parse_ether(&max_price_per_mcycle)?;
+    let timeout: u32 = timeout.parse()?;
+    let lock_timeout: u32 = lock_timeout.parse()?;
+    let ramp_up_period: u32 = ramp_up_period.parse()?;
 
     // Creates a storage provider based on the environment variables.
     //
@@ -40,60 +61,44 @@ pub async fn run_boundless(elf: &[u8], input_data: Vec<u8>) -> Result<Receipt> {
     // - `PINATA_JWT`, `PINATA_API_URL`, `IPFS_GATEWAY_URL`: Pinata storage provider;
     // - `S3_ACCESS`, `S3_SECRET`, `S3_BUCKET`, `S3_URL`, `AWS_REGION`: S3 storage provider.
     // TODO: gcp storage provider
-    let storage_provider = BuiltinStorageProvider::from_env().await?;
+    let storage_provider = storage_provider_from_env()?;
 
-    let image_url = storage_provider.upload_image(elf).await?;
+    let image_url = storage_provider.upload_program(elf).await?;
     info!("Uploaded image to {}", image_url);
 
-    let boundless_market_address = boundless_market::alloy::primitives::Address::parse_checksummed(
-        boundless_market_address,
-        None,
-    )?;
-    let order_stream_url = order_stream_url.map(|url| Url::parse(&url)).transpose()?;
     let wallet_private_key = PrivateKeySigner::from_str(&wallet_private_key)?;
     let rpc_url = Url::parse(&rpc_url)?;
-    let set_verifier_addr = boundless_market::alloy::primitives::Address::parse_checksummed(
-        set_verifier_addr.unwrap_or_default(),
-        None,
-    )?;
+
+    let mut deployment = Deployment::from_chain_id(chain_id);
+
+    if let Some(dep) = deployment.as_mut() {
+        if dep.chain_id.unwrap() == NamedChain::Base as u64 && chain_id == 84532 {
+            dep.chain_id = Some(NamedChain::BaseSepolia as u64);
+        }
+    }
 
     // Create a Boundless client from the provided parameters.
     let boundless_client = ClientBuilder::new()
         .with_rpc_url(rpc_url)
-        .with_boundless_market_address(boundless_market_address)
-        .with_set_verifier_address(set_verifier_addr)
-        .with_order_stream_url(offchain.then_some(order_stream_url).flatten())
+        .with_deployment(deployment)
         .with_storage_provider(Some(storage_provider))
         .with_private_key(wallet_private_key)
         .build()
-        .await?;
-
-    let balance = boundless_client
-        .boundless_market
-        .balance_of(boundless_client.local_signer.as_ref().unwrap().address())
-        .await?;
-    info!("Wallet balance: {}", balance);
-    if balance < parse_ether("0.1")? {
-        info!("Wallet balance is low, depositing 0.1 ETH");
-        boundless_client
-            .boundless_market
-            .deposit(parse_ether("0.1")?)
-            .await?;
-    }
+        .await
+        .context("failed to build boundless client")?;
 
     // Encode the input and upload it to the storage provider.
-    let input_builder = InputBuilder::new().write_slice(&input_data);
-    tracing::info!("input builder: {:?}", input_builder);
-
-    let guest_env = input_builder.clone().build_env()?;
-    let guest_env_bytes = guest_env.encode()?;
+    let guest_env = risc0_zkvm::ExecutorEnv::builder()
+        .write_slice(&input_data)
+        .build()
+        .unwrap();
 
     // Dry run the ELF with the input to get the journal and cycle count.
     // This can be useful to estimate the cost of the proving request.
     // It can also be useful to ensure the guest can be executed correctly and we do not send into
     // the market unprovable proving requests. If you have a different mechanism to get the expected
     // journal and set a price, you can skip this step.
-    let session_info = default_executor().execute(guest_env.try_into().unwrap(), elf)?;
+    let session_info = default_executor().execute(guest_env, elf)?;
     let mcycles_count = session_info
         .segments
         .iter()
@@ -101,6 +106,28 @@ pub async fn run_boundless(elf: &[u8], input_data: Vec<u8>) -> Result<Receipt> {
         .sum::<u64>()
         .div_ceil(1_000_000);
     let journal = session_info.journal;
+
+    info!(
+        "Dry run completed: {} mcycles, journal digest: {}",
+        mcycles_count,
+        journal.digest()
+    );
+
+    let address = boundless_client.signer.as_ref().unwrap().address();
+    let balance = boundless_client
+        .boundless_market
+        .balance_of(address)
+        .await?;
+    let max_price = max_price_per_mcycle * Uint::from(mcycles_count);
+    info!(address = %address, max_price = %max_price, "Wallet balance: {}", balance);
+    if balance < max_price {
+        let deposit = std::cmp::max(max_price, parse_ether("0.1")?);
+        info!(
+            "Wallet balance ({}) is low, depositing {} ETH",
+            balance, deposit
+        );
+        boundless_client.boundless_market.deposit(deposit).await?;
+    }
 
     // Create a proof request with the image, input, requirements and offer.
     // The ELF (i.e. image) is specified by the image URL.
@@ -116,22 +143,25 @@ pub async fn run_boundless(elf: &[u8], input_data: Vec<u8>) -> Result<Receipt> {
     // - the lockin price: the price at which the request can be locked in by a prover, if the
     //   request is not fulfilled before the timeout, the prover can be slashed.
     // If the input exceeds 2 kB, upload the input and provide its URL instead, as a rule of thumb.
-    let request_input = if guest_env_bytes.len() > 2 << 10 {
-        let input_url = boundless_client.upload_input(&guest_env_bytes).await?;
-        tracing::info!("Uploaded input to {}", input_url);
-        Input::url(input_url)
-    } else {
-        tracing::info!("Sending input inline with request");
-        Input::inline(guest_env_bytes.clone())
-    };
+    // let request_input = if guest_env_bytes.len() > 2 << 10 {
+    //     let input_url = boundless_client.upload_input(&guest_env_bytes).await?;
+    //     tracing::info!("Uploaded input to {}", input_url);
+    //     Input::url(input_url)
+    // } else {
+    //     tracing::info!("Sending input inline with request");
+    //     Input::inline(guest_env_bytes.clone())
+    // };
+    //
+    let env = GuestEnvBuilder::new().write_slice(&input_data).build_env();
 
-    let request = ProofRequestBuilder::new()
-        .with_image_url(image_url.to_string())
-        .with_input(request_input)
-        .with_requirements(Requirements::new(
-            compute_image_id(elf)?,
-            Predicate::digest_match(journal.digest()),
-        ))
+    let request = boundless_client
+        .new_request()
+        .with_program_url(image_url)?
+        .with_env(env)
+        // .with_requirements(Requirements::new(
+        //     compute_image_id(elf)?,
+        //     Predicate::digest_match(journal.digest()),
+        // ))
         .with_offer(
             Offer::default()
                 // The market uses a reverse Dutch auction mechanism to match requests with provers.
@@ -139,36 +169,51 @@ pub async fn run_boundless(elf: &[u8], input_data: Vec<u8>) -> Result<Receipt> {
                 // is to choose a desired (min and max) price per million cycles and multiply it
                 // by the number of cycles. Alternatively, you can use the `with_min_price` and
                 // `with_max_price` methods to set the price directly.
-                .with_min_price_per_mcycle(parse_ether("0.001")?, mcycles_count)
+                .with_min_price_per_mcycle(min_price_per_mcycle, mcycles_count)
                 // NOTE: If your offer is not being accepted, try increasing the max price.
-                .with_max_price_per_mcycle(parse_ether("0.05")?, mcycles_count)
+                .with_max_price_per_mcycle(max_price_per_mcycle, mcycles_count)
                 // The timeout is the maximum number of blocks the request can stay
                 // unfulfilled in the market before it expires. If a prover locks in
                 // the request and does not fulfill it before the timeout, the prover can be
                 // slashed.
-                .with_timeout(1000)
-                .with_lock_timeout(500)
-                .with_ramp_up_period(100),
-        )
-        .build()
-        .unwrap();
+                .with_timeout(timeout)
+                .with_lock_timeout(lock_timeout)
+                .with_ramp_up_period(ramp_up_period)
+                .with_bidding_start(get_current_timestamp_secs()),
+        );
 
     // Send the request and wait for it to be completed.
     let (request_id, expires_at) = if offchain {
-        boundless_client.submit_request_offchain(&request).await?
+        boundless_client.submit_offchain(request).await?
     } else {
-        boundless_client.submit_request(&request).await?
+        boundless_client.submit_onchain(request).await?
     };
     tracing::info!("Request 0x{request_id:x} submitted");
+    tracing::info!("https://explorer.beboundless.xyz/orders/0x{request_id:x}");
 
     // Wait for the request to be fulfilled by the market, returning the journal and seal.
-    tracing::info!("Waiting for 0x{request_id:x} to be fulfilled");
-    let (_journal, seal) = boundless_client
-        .wait_for_request_fulfillment(request_id, Duration::from_secs(5), expires_at)
+    let (journal, seal) = boundless_client
+        .wait_for_request_fulfillment(request_id, Duration::from_secs(3), expires_at)
         .await?;
     tracing::info!("Request 0x{request_id:x} fulfilled");
 
-    let receipt: Receipt = bincode::deserialize(&seal)?;
+    // write journal & seal to disk for debugging purposes
+    std::fs::write("journal.bin", bincode::serialize(&journal)?)?;
+    std::fs::write("seal.bin", seal.clone())?;
+
+    let image_id = compute_image_id(elf)?;
+    let receipt = boundless_client
+        .set_verifier
+        .fetch_receipt(seal, image_id, journal.to_vec())
+        .await?;
+
+    let receipt = receipt.root.ok_or(anyhow::anyhow!(
+        "Failed to get root from receipt, this is likely a bug in the SDK"
+    ))?;
+
+    receipt.verify(image_id).context("Verify proof")?;
+
+    info!("Receipt verified successfully");
 
     Ok(receipt)
 }
@@ -222,4 +267,11 @@ pub async fn run_bonsai(elf: &[u8], input_data: Vec<u8>) -> Result<Receipt> {
             );
         }
     }
+}
+
+pub fn get_current_timestamp_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs()
 }

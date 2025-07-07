@@ -75,7 +75,7 @@ pub mod risc0 {
                 "bonsai" => {
                     let input_data =
                         bonsai_runner::as_input_data(&(commitment_metadata, calldatas))?;
-                    bonsai_runner::run_bonsai(self.binary, input_data.clone()).await?
+                    bonsai_runner::run_bonsai(self.binary, input_data).await?
                 }
                 "boundless" => {
                     let input_data =

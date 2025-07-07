@@ -85,6 +85,19 @@ pub struct APIBlock {
     pub total_txs: u64, // Total number of transactions in the block
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct APIDataProposal {
+    // Struct for the data_proposals table
+    pub hash: DataProposalHash,                // The data proposal hash
+    pub parent_hash: Option<DataProposalHash>, // Parent data proposal hash (nullable)
+    pub lane_id: String,                       // Lane that created this proposal
+    pub tx_count: u32,                         // Number of transactions
+    pub estimated_size: u64,                   // Estimated size in bytes
+    pub block_hash: ConsensusProposalHash,     // Block containing this DP
+    pub block_height: u64,                     // Height of the block
+    pub timestamp: i64, // Block timestamp as creation time (Unix timestamp in ms)
+}
+
 #[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
 #[cfg_attr(
     feature = "sqlx",

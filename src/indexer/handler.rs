@@ -88,6 +88,18 @@ pub struct TxBlobProofOutputStore {
     pub settled: bool,
 }
 
+#[derive(Debug)]
+pub struct DataProposalStore {
+    pub hash: DataProposalHashDb,
+    pub parent_hash: Option<DataProposalHashDb>,
+    pub lane_id: String,
+    pub tx_count: i32,
+    pub estimated_size: i64,
+    pub block_hash: ConsensusProposalHash,
+    pub block_height: i64,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Default)]
 pub(crate) struct IndexerHandlerStore {
     blocks: Vec<Arc<Block>>,
@@ -106,6 +118,7 @@ pub(crate) struct IndexerHandlerStore {
     contract_states: Vec<TxContractStateStore>,
     deleted_contracts: HashSet<ContractName>,
     blob_proof_outputs: Vec<TxBlobProofOutputStore>,
+    data_proposals: Vec<DataProposalStore>,
 }
 
 impl std::fmt::Debug for IndexerHandlerStore {
@@ -120,6 +133,7 @@ impl std::fmt::Debug for IndexerHandlerStore {
             .field("contracts", &self.contracts.len())
             .field("contract_states", &self.contract_states.len())
             .field("blob_proof_outputs", &self.blob_proof_outputs.len())
+            .field("data_proposals", &self.data_proposals.len())
             .finish()
     }
 }
@@ -141,6 +155,30 @@ impl Indexer {
                 self.dump_store_to_db().await?;
             }
         }
+
+        Ok(())
+    }
+
+    pub async fn handle_node_state_indexer_event(
+        &mut self,
+        event: NodeStateIndexerEvent,
+    ) -> Result<(), Error> {
+        info!("Handling node state indexer event: {:?}", event);
+        match event {
+            NodeStateIndexerEvent::DataProposalsFromBlock {
+                block_hash,
+                block_height,
+                block_timestamp,
+                data_proposals,
+            } => {
+                self.handle_data_proposals_from_block(
+                    block_hash,
+                    block_height,
+                    block_timestamp,
+                    data_proposals,
+                )?;
+            }
+        };
 
         Ok(())
     }
@@ -188,6 +226,40 @@ impl Indexer {
                 .context("Inserting blocks")?;
         }
 
+        // Insert data proposals
+        if !self.handler_store.data_proposals.is_empty() {
+            let mut query_builder = QueryBuilder::new(
+                "INSERT INTO data_proposals (hash, parent_hash, lane_id, tx_count, estimated_size, block_hash, block_height, created_at)",
+            );
+
+            query_builder.push_values(&self.handler_store.data_proposals, |mut b, dp| {
+                info!(
+                    "Inserting data proposal {} with parent hash {:?} in block {}",
+                    dp.hash.0,
+                    dp.parent_hash.as_ref().map(|h| h.0.clone()),
+                    dp.block_hash.0
+                );
+                b.push_bind(&dp.hash)
+                    .push_bind(&dp.parent_hash)
+                    .push_bind(&dp.lane_id)
+                    .push_bind(dp.tx_count)
+                    .push_bind(dp.estimated_size)
+                    .push_bind(&dp.block_hash)
+                    .push_bind(dp.block_height)
+                    .push_bind(dp.created_at);
+            });
+
+            query_builder.push(" ON CONFLICT (hash) DO NOTHING");
+
+            query_builder
+                .build()
+                .execute(&mut *transaction)
+                .await
+                .context("Inserting data proposals")?;
+
+            self.handler_store.data_proposals.clear();
+        }
+
         // Insert transactions into the database with batching
         if !self.handler_store.block_txs.is_empty() {
             const TRANSACTIONS_PARAMS: usize = 10; // tx_hash, parent_dp_hash, version, transaction_type, transaction_status, block_hash, block_height, index, lane_id, identity
@@ -232,16 +304,10 @@ impl Indexer {
                         TransactionData::VerifiedProof(_) => TransactionStatusDb::Success,
                     };
 
-                    let lane_id: LaneIdDb = log_error!(
-                        block
-                            .lane_ids
-                            .get(&tx_id.1)
-                            .context(format!("No lane id present for tx {tx_id}")),
-                        "Getting lane id for tx"
-                    )
-                    .unwrap_or(&LaneId::default())
-                    .clone()
-                    .into();
+                    let lane_id: Option<LaneIdDb> = block
+                        .lane_ids
+                        .get(&tx_id.1)
+                        .map(|lane_id| lane_id.clone().into());
 
                     let identity = match tx.transaction_data {
                         TransactionData::Blob(ref tx) => Some(tx.identity.0.clone()),
@@ -924,25 +990,33 @@ impl Indexer {
         #[allow(clippy::explicit_counter_loop)]
         for (tx_id, tx) in &block.txs {
             info!(
-                "Processing transaction {} at block height {}",
-                tx_id, block_height
+                "Processing transaction {} at block height {} in data proposal {:?}",
+                tx_id,
+                block_height,
+                block.dp_parent_hashes.get(&tx_id.1).context(format!(
+                    "No parent data proposal hash present for tx {}",
+                    &tx_id.1
+                ))
             );
+
+            let tx_hash: TxHashDb = tx_id.1.clone().into();
+            let ctx = block.build_tx_ctx(&tx_hash.0);
+            let (lane_id, timestamp) = match ctx {
+                Ok(ctx) => (Some(ctx.lane_id), Some(ctx.timestamp)),
+                Err(_) => (None, None),
+            };
+
             self.handler_store
                 .block_txs
                 .insert(tx_id.clone(), (i, arc_block.clone(), tx.clone()));
 
-            let tx_hash: TxHashDb = tx_id.1.clone().into();
             let parent_data_proposal_hash: DataProposalHashDb = tx_id.0.clone().into();
 
             _ = log_warn!(
                 self.insert_tx_data(&tx_hash, tx, parent_data_proposal_hash.clone(),),
                 "Inserting tx data when tx in block"
             );
-            let ctx = block.build_tx_ctx(&tx_hash.0);
-            let (lane_id, timestamp) = match ctx {
-                Ok(ctx) => (Some(ctx.lane_id), Some(ctx.timestamp)),
-                Err(_) => (None, None),
-            };
+
             if let TransactionData::Blob(blob_tx) = &tx.transaction_data {
                 // Send the transaction to all websocket subscribers
                 self.send_blob_transaction_to_websocket_subscribers(
@@ -1231,6 +1305,80 @@ impl Indexer {
                 .bind(timeout_window_db)
                 .bind(contract_name),
             );
+        }
+
+        Ok(())
+    }
+
+    fn handle_data_proposals_from_block(
+        &mut self,
+        block_hash: ConsensusProposalHash,
+        block_height: BlockHeight,
+        block_timestamp: TimestampMs,
+        data_proposals: Vec<DataProposalMetadata>,
+    ) -> Result<(), Error> {
+        let block_height_i64 = i64::try_from(block_height.0)
+            .map_err(|_| anyhow::anyhow!("Block height too large for i64"))?;
+
+        for dp_metadata in data_proposals {
+            // A bit hacky, but it allows to have no empty field in dp_hash for first lane's dp
+            // transactions
+            let parent_dp = dp_metadata
+                .parent_hash
+                .clone()
+                .map(|h| h.into())
+                .unwrap_or_else(|| {
+                    DataProposalHashDb(DataProposalHash(hex::encode(&dp_metadata.lane_id.0 .0)))
+                });
+
+            // If this is the first DP in a lane (no parent_hash), ensure the virtual DP exists
+            if dp_metadata.parent_hash.as_ref().map(|h| &h.0)
+                == Some(&hex::encode(&dp_metadata.lane_id.0 .0))
+            {
+                let lane_id_str = hex::encode(&dp_metadata.lane_id.0 .0);
+                let lane_id_dp_hash: DataProposalHashDb =
+                    DataProposalHash(lane_id_str.clone()).into();
+
+                if !self
+                    .handler_store
+                    .data_proposals
+                    .iter()
+                    .any(|dp| dp.hash == lane_id_dp_hash)
+                {
+                    self.handler_store.data_proposals.push(DataProposalStore {
+                        hash: lane_id_dp_hash,
+                        parent_hash: None,
+                        lane_id: lane_id_str,
+                        tx_count: 0, // Virtual DP, no actual transactions
+                        estimated_size: 0,
+                        block_hash: block_hash.clone(),
+                        block_height: block_height_i64,
+                        created_at: into_utc_date_time(&block_timestamp)?,
+                    });
+                }
+            }
+
+            let dp_store = DataProposalStore {
+                hash: dp_metadata.hash.into(),
+                parent_hash: Some(parent_dp),
+                lane_id: hex::encode(&dp_metadata.lane_id.0 .0),
+                tx_count: dp_metadata.tx_count as i32,
+                estimated_size: dp_metadata.estimated_size as i64,
+                block_hash: block_hash.clone(),
+                block_height: block_height_i64,
+                created_at: into_utc_date_time(&block_timestamp)?,
+            };
+
+            for tx in &dp_metadata.tx_hashes {
+                let tx_hash: TxHashDb = tx.clone().into();
+                self.handler_store.sql_updates.push(
+                    sqlx::query("UPDATE transactions SET dp_hash = $1 WHERE tx_hash = $2 AND parent_dp_hash = $3")
+                        .bind(dp_store.hash.clone())
+                        .bind(tx_hash)
+                        .bind(dp_store.parent_hash.clone())
+                );
+            }
+            self.handler_store.data_proposals.push(dp_store);
         }
 
         Ok(())

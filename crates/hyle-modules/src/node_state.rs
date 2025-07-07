@@ -1695,10 +1695,26 @@ pub mod test {
             data_proposals: vec![(
                 LaneId::default(),
                 vec![DataProposal::new(
-                    Some(DataProposalHash(format!("{height}"))),
+                    Some(DataProposalHash(format!("{height:064x}"))),
                     txs,
                 )],
             )],
+        }
+    }
+
+    pub fn craft_signed_block_with_lane_id_and_parent_dp_hash(
+        height: u64,
+        lane_id: LaneId,
+        parent_dp_hash: Option<DataProposalHash>,
+        txs: Vec<Transaction>,
+    ) -> SignedBlock {
+        SignedBlock {
+            certificate: AggregateSignature::default(),
+            consensus_proposal: ConsensusProposal {
+                slot: height,
+                ..ConsensusProposal::default()
+            },
+            data_proposals: vec![(lane_id, vec![DataProposal::new(parent_dp_hash, txs)])],
         }
     }
 
@@ -1714,7 +1730,7 @@ pub mod test {
                 ..ConsensusProposal::default()
             },
             data_proposals: vec![(
-                LaneId::default(),
+                LaneId(ValidatorPublicKey(vec![0; 48])),
                 vec![DataProposal::new(Some(parent_dp_hash), txs)],
             )],
         }
@@ -1734,6 +1750,23 @@ pub mod test {
         pub fn craft_block_and_handle(&mut self, height: u64, txs: Vec<Transaction>) -> Block {
             let block = craft_signed_block(height, txs);
             self.force_handle_block(&block)
+        }
+
+        pub fn craft_block_and_handle_with_lane_id_and_parent_dp_hash(
+            &mut self,
+            height: u64,
+            lane_id: LaneId,
+            parent_dp_hash: Option<DataProposalHash>,
+            txs: Vec<Transaction>,
+        ) -> (Block, Vec<DataProposalMetadata>) {
+            let block = craft_signed_block_with_lane_id_and_parent_dp_hash(
+                height,
+                lane_id,
+                parent_dp_hash,
+                txs,
+            );
+            let data_proposals_metadata = block.extract_data_proposal_metadata();
+            (self.force_handle_block(&block), data_proposals_metadata)
         }
 
         pub fn craft_block_and_handle_with_parent_dp_hash(

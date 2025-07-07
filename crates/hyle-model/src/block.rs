@@ -125,7 +125,7 @@ impl SignedBlock {
                     dp.parent_data_proposal_hash
                         .clone()
                         // This is weird but has to match the workaround in own_lane.rs
-                        .unwrap_or(DataProposalHash(lane_id.0.to_string())),
+                        .unwrap_or(DataProposalHash(hex::encode(lane_id.0 .0))),
                     &dp.txs,
                 )
             })
@@ -136,6 +136,33 @@ impl SignedBlock {
             txs.iter()
                 .map(move |tx| (lane_id.clone(), TxId(dp_hash.clone(), tx.hashed()), tx))
         })
+    }
+
+    pub fn extract_data_proposal_metadata(&self) -> Vec<DataProposalMetadata> {
+        let mut data_proposals_metadata = Vec::new();
+
+        for (lane_id, data_proposals) in &self.data_proposals {
+            for dp in data_proposals {
+                let dp_hash = dp.hashed();
+                let tx_hashes: Vec<TxHash> = dp.txs.iter().map(|tx| tx.hashed()).collect();
+
+                let parent_hash: Option<DataProposalHash> = if self.height().0 == 0 {
+                    Some(DataProposalHash(hex::encode(&lane_id.0 .0)))
+                } else {
+                    dp.parent_data_proposal_hash.clone()
+                };
+
+                data_proposals_metadata.push(DataProposalMetadata {
+                    hash: dp_hash,
+                    parent_hash,
+                    lane_id: lane_id.clone(),
+                    tx_count: dp.txs.len(),
+                    estimated_size: dp.estimate_size(),
+                    tx_hashes,
+                });
+            }
+        }
+        data_proposals_metadata
     }
 }
 

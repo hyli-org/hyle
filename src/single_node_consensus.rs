@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use crate::bus::command_response::{CmdRespClient, Query};
 use crate::bus::BusClientSender;
-use crate::consensus::ConfirmAckMarker;
 use crate::consensus::{CommittedConsensusProposal, ConsensusEvent, QueryConsensusInfo};
+use crate::consensus::{ConfirmAckMarker, QueryConsensusStakingState};
 use crate::genesis::GenesisEvent;
 use crate::mempool::QueryNewCut;
 use crate::model::*;
@@ -24,6 +24,7 @@ struct SingleNodeConsensusBusClient {
     sender(ConsensusEvent),
     sender(Query<QueryNewCut, Cut>),
     receiver(Query<QueryConsensusInfo, ConsensusInfo>),
+    receiver(Query<QueryConsensusStakingState, Staking>),
     receiver(GenesisEvent),
 }
 }
@@ -157,6 +158,9 @@ impl SingleNodeConsensus {
                 let validators = vec![];
                 Ok(ConsensusInfo { slot, view, round_leader, last_timestamp, validators })
             },
+            command_response<QueryConsensusStakingState, Staking> _ => {
+                Ok(self.store.staking.clone())
+            }
             _ = interval.tick() => {
                 self.handle_new_slot_tick().await?;
             },

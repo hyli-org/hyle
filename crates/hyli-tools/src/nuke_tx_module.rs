@@ -37,7 +37,8 @@ impl Module for NukeTxModule {
         let bus = NukeTxBusClient::new_from_bus(bus.new_handle()).await;
         let secret_key_bytes =
             hex::decode(&ctx.config.secret_key).context("Failed to decode secret key hex")?;
-        let secret_key = SecretKey::from_slice(&secret_key_bytes).context("Invalid secret key")?;
+        let secret_key = SecretKey::from_byte_array(secret_key_bytes.try_into().expect("32 bytes"))
+            .expect("32 bytes, within curve order");
 
         Ok(NukeTxModule {
             _bus: bus,

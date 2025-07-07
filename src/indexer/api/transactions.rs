@@ -100,8 +100,8 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for TxHashDb {
 pub struct LaneIdDb(pub LaneId);
 
 impl From<LaneId> for LaneIdDb {
-    fn from(tx_hash: LaneId) -> Self {
-        LaneIdDb(tx_hash)
+    fn from(lane_id: LaneId) -> Self {
+        LaneIdDb(lane_id)
     }
 }
 

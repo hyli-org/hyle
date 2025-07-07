@@ -40,6 +40,7 @@ module_bus_client! {
 #[derive(Debug)]
 pub struct NodeStateBusClient {
     sender(NodeStateEvent),
+    sender(NodeStateIndexerEvent),
     receiver(DataEvent),
     receiver(Query<ContractName, (BlockHeight, Contract)>),
     receiver(Query<QuerySettledHeight, BlockHeight>),
@@ -122,11 +123,29 @@ impl Module for NodeStateModule {
             listen<DataEvent> block => {
                 match block {
                     DataEvent::OrderedSignedBlock(block) => {
+                        // Extract data proposal metadata before processing
+                        let data_proposals_metadata = block.extract_data_proposal_metadata();
+
                         // TODO: If we are in a broken state, this will likely kill the node every time.
                         let node_state_block = self.inner.handle_signed_block(&block)?;
+
+                        // Send data proposal metadata event if we have any
+                        if !data_proposals_metadata.is_empty() {
+                            _ = log_error!(
+                                self.bus.send(NodeStateIndexerEvent::DataProposalsFromBlock {
+                                    block_hash: node_state_block.hash.clone(),
+                                    block_height: node_state_block.block_height,
+                                    block_timestamp: node_state_block.block_timestamp.clone(),
+                                    data_proposals: data_proposals_metadata,
+                                }),
+                                "Sending DataProposalsFromBlock event"
+                            );
+                        }
+
                         _ = log_error!(self
                             .bus
                             .send(NodeStateEvent::NewBlock(Box::new(node_state_block))), "Sending DataEvent while processing SignedBlock");
+
                     }
                 }
             }

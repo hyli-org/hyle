@@ -10,10 +10,29 @@ CREATE TABLE blocks (
     CHECK (height >= 0)             -- Ensure the height is positive
 );
 
+-- Add data_proposals table to store metadata for all data proposals
+CREATE TABLE data_proposals (
+    hash TEXT PRIMARY KEY,                                        -- The data proposal hash
+    parent_hash TEXT,                                             -- Parent data proposal hash (nullable)
+    lane_id TEXT NOT NULL,                                        -- Lane that created this proposal
+    tx_count INT NOT NULL,                                        -- Number of transactions
+    estimated_size BIGINT NOT NULL,                               -- Estimated size in bytes
+    block_hash TEXT NOT NULL REFERENCES blocks(hash) ON DELETE CASCADE,  -- Block containing this DP
+    block_height BIGINT NOT NULL,                                 -- Height of the block
+    created_at TIMESTAMP(3) NOT NULL,                             -- Block timestamp as creation time
+
+    -- CHECK (length(hash) = 64), -- First DP hash of lane is pubkey, so longer than 64
+    CHECK (tx_count >= 0),
+    CHECK (estimated_size >= 0),
+    CHECK (block_height >= 0),
+    CHECK (length(lane_id) = 96)
+);
+
 CREATE TYPE transaction_type AS ENUM ('blob_transaction', 'proof_transaction', 'stake');
-CREATE TYPE transaction_status AS ENUM ('data_proposal_created','waiting_dissemination','success', 'failure', 'sequenced', 'timed_out');
+CREATE TYPE transaction_status AS ENUM ('data_proposal_created', 'waiting_dissemination','success', 'failure', 'sequenced', 'timed_out');
 
 CREATE TABLE transactions (
+    dp_hash TEXT,                                           -- Data Proposal hash
     parent_dp_hash TEXT NOT NULL,                           -- Data Proposal hash
     tx_hash TEXT NOT NULL,
     version INT NOT NULL,
@@ -25,7 +44,9 @@ CREATE TABLE transactions (
     index INT,                              -- Index of the transaction within the block
     identity TEXT,                          -- Identity (NULL except for blob transactions)
     PRIMARY KEY (parent_dp_hash, tx_hash),
-    CHECK (length(tx_hash) = 64)
+
+    CHECK (length(tx_hash) = 64),
+    CHECK (length(lane_id) = 96)
 );
 
 CREATE INDEX idx_transactions_lane_id ON transactions(lane_id);

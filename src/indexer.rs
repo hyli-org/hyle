@@ -43,6 +43,7 @@ module_bus_client! {
 #[derive(Debug)]
 struct IndexerBusClient {
     receiver(NodeStateEvent),
+    receiver(NodeStateIndexerEvent),
     receiver(MempoolStatusEvent),
 }
 }
@@ -137,6 +138,12 @@ impl Indexer {
                     "Indexer handling node state event");
             }
 
+            listen<NodeStateIndexerEvent> event => {
+                _ = log_error!(self.handle_node_state_indexer_event(event)
+                    .await,
+                    "Indexer handling node state indexer event");
+            }
+
             listen<MempoolStatusEvent> _event => {
                 // _ = log_error!(self.handle_mempool_status_event(event)
                 //     .await,
@@ -217,6 +224,9 @@ impl Indexer {
             .routes(routes!(api::get_last_block))
             .routes(routes!(api::get_block))
             .routes(routes!(api::get_block_by_hash))
+            // data proposals
+            .routes(routes!(api::get_data_proposals_by_lane))
+            .routes(routes!(api::get_data_proposal_by_hash))
             // transaction
             .routes(routes!(api::get_transactions))
             .routes(routes!(api::get_transactions_by_height))
@@ -334,6 +344,7 @@ mod test {
     use hydentity::{client::tx_executor_handler::register_identity, HydentityAction};
     use hyle_contract_sdk::{BlobIndex, HyleOutput, Identity, ProgramId, StateCommitment, TxHash};
     use hyle_model::api::{APIBlob, APIBlock, APIContract, APITransaction, APITransactionEvents};
+    use hyle_model::NodeStateIndexerEvent::DataProposalsFromBlock;
     use serde_json::json;
     use std::future::IntoFuture;
     use utils::TimestampMs;
@@ -598,11 +609,21 @@ mod test {
         let mut signed_block = SignedBlock::default();
         signed_block.consensus_proposal.slot = 1;
         signed_block.data_proposals.push((
-            LaneId(ValidatorPublicKey("ttt".into())),
+            LaneId(ValidatorPublicKey(vec![0; 48])),
             vec![parent_data_proposal.clone()],
         ));
+        let data_proposal_metadata = signed_block.extract_data_proposal_metadata();
         let block = node_state.force_handle_block(&signed_block);
 
+        indexer
+            .handle_node_state_indexer_event(DataProposalsFromBlock {
+                block_hash: block.hash.clone(),
+                block_height: block.block_height,
+                block_timestamp: block.block_timestamp.clone(),
+                data_proposals: data_proposal_metadata,
+            })
+            .await
+            .unwrap();
         indexer
             .handle_processed_block(block)
             .expect("Failed to handle block");
@@ -772,11 +793,22 @@ mod test {
         signed_block.consensus_proposal.timestamp = TimestampMs(12345);
         signed_block.consensus_proposal.slot = 2;
         signed_block.data_proposals.push((
-            LaneId(ValidatorPublicKey("ttt".into())),
+            LaneId(ValidatorPublicKey(vec![0; 48])),
             vec![data_proposal, data_proposal_2],
         ));
+        let data_proposal_metadata_2 = signed_block.extract_data_proposal_metadata();
+
         let block_2 = node_state.force_handle_block(&signed_block);
         let block_2_hash = block_2.hash.clone();
+        indexer
+            .handle_node_state_indexer_event(DataProposalsFromBlock {
+                block_hash: block_2.hash.clone(),
+                block_height: block_2.block_height,
+                block_timestamp: block_2.block_timestamp.clone(),
+                data_proposals: data_proposal_metadata_2,
+            })
+            .await
+            .unwrap();
         indexer
             .handle_processed_block(block_2)
             .expect("Failed to handle block");
@@ -954,8 +986,13 @@ mod test {
         BlobTransaction::new("hyli@wallet".to_string(), tx.blobs)
     }
 
-    async fn scenario_contracts() -> Result<(ContainerAsync<Postgres>, Indexer, Block, Block, Block)>
-    {
+    async fn scenario_contracts() -> Result<(
+        ContainerAsync<Postgres>,
+        Indexer,
+        (Block, Vec<DataProposalMetadata>),
+        (Block, Vec<DataProposalMetadata>),
+        (Block, Vec<DataProposalMetadata>),
+    )> {
         let container = Postgres::default()
             .with_tag("17-alpine")
             .start()
@@ -998,15 +1035,21 @@ mod test {
             ],
         );
 
+        // For the first DP of a lane; we use lane_id as its parents hash
+        let lane_id = LaneId(ValidatorPublicKey(vec![0; 48]));
+
         // Create a couple fake blocks with contracts
-        let b1 = node_state.craft_block_and_handle(
-            3,
-            vec![
-                new_register_tx(ContractName::new("a"), StateCommitment(vec![])).into(),
-                new_register_tx(ContractName::new("b"), StateCommitment(vec![])).into(),
-                new_register_tx(ContractName::new("c"), StateCommitment(vec![])).into(),
-            ],
-        );
+        let (b1, b1_data_proposals) = node_state
+            .craft_block_and_handle_with_lane_id_and_parent_dp_hash(
+                2,
+                lane_id.clone(),
+                None,
+                vec![
+                    new_register_tx(ContractName::new("a"), StateCommitment(vec![])).into(),
+                    new_register_tx(ContractName::new("b"), StateCommitment(vec![])).into(),
+                    new_register_tx(ContractName::new("c"), StateCommitment(vec![])).into(),
+                ],
+            );
 
         let delete_a = new_delete_tx(ContractName::new("hyle"), ContractName::new("a"));
         let delete_c = new_delete_tx(ContractName::new("hyle"), ContractName::new("c"));
@@ -1028,15 +1071,20 @@ mod test {
             StateCommitment(vec![2]),
         );
 
-        let b2 = node_state.craft_block_and_handle(
-            4,
-            vec![
-                delete_a.into(),
-                delete_a_proof,
-                delete_c.into(),
-                delete_c_proof,
-            ],
-        );
+        let dp_hash_b1 =
+            DataProposal::new(None, b1.txs.iter().map(|tx| tx.1.clone()).collect()).hashed();
+        let (b2, b2_data_proposals) = node_state
+            .craft_block_and_handle_with_lane_id_and_parent_dp_hash(
+                3,
+                lane_id.clone(),
+                Some(dp_hash_b1),
+                vec![
+                    delete_a.into(),
+                    delete_a_proof,
+                    delete_c.into(),
+                    delete_c_proof,
+                ],
+            );
 
         let delete_b = new_delete_tx(ContractName::new("hyle"), ContractName::new("b"));
         let delete_b_proof = new_proof_tx(
@@ -1068,29 +1116,58 @@ mod test {
             StateCommitment(vec![5]),
         );
 
-        let b3 = node_state.craft_block_and_handle_with_parent_dp_hash(
-            5,
-            vec![
-                new_register_tx(ContractName::new("a"), StateCommitment(vec![])).into(),
-                delete_b.into(),
-                delete_b_proof,
-                delete_a.into(),
-                delete_a_proof,
-                new_register_tx(ContractName::new("a"), StateCommitment(vec![])).into(),
-                new_register_tx(ContractName::new("d"), StateCommitment(vec![])).into(),
-                delete_d.into(),
-                delete_d_proof,
-            ],
-            DataProposalHash("test".to_string()),
-        );
+        let parent_dp_hash = b2.dp_parent_hashes.iter().next().unwrap().1.clone();
+        let dp_hash_b2 = DataProposal::new(
+            Some(parent_dp_hash),
+            b2.txs.iter().map(|tx| tx.1.clone()).collect(),
+        )
+        .hashed();
+        let (b3, b3_data_proposals) = node_state
+            .craft_block_and_handle_with_lane_id_and_parent_dp_hash(
+                4,
+                lane_id.clone(),
+                Some(dp_hash_b2),
+                vec![
+                    new_register_tx(ContractName::new("a"), StateCommitment(vec![])).into(),
+                    delete_b.into(),
+                    delete_b_proof,
+                    delete_a.into(),
+                    delete_a_proof,
+                    new_register_tx(ContractName::new("a"), StateCommitment(vec![])).into(),
+                    new_register_tx(ContractName::new("d"), StateCommitment(vec![])).into(),
+                    delete_d.into(),
+                    delete_d_proof,
+                ],
+            );
 
-        Ok((container, indexer, b1, b2, b3))
+        Ok((
+            container,
+            indexer,
+            (b1, b1_data_proposals),
+            (b2, b2_data_proposals),
+            (b3, b3_data_proposals),
+        ))
     }
 
     #[test_log::test(tokio::test)]
     async fn test_contracts_dump_every_block() -> Result<()> {
-        let (_c, mut indexer, b1, b2, b3) = scenario_contracts().await?;
+        let (
+            _c,
+            mut indexer,
+            (b1, b1_data_proposals),
+            (b2, b2_data_proposals),
+            (b3, b3_data_proposals),
+        ) = scenario_contracts().await?;
 
+        indexer
+            .handle_node_state_indexer_event(DataProposalsFromBlock {
+                block_hash: b1.hash.clone(),
+                block_height: b1.block_height,
+                block_timestamp: b1.block_timestamp.clone(),
+                data_proposals: b1_data_proposals,
+            })
+            .await
+            .unwrap();
         indexer.handle_processed_block(b1.clone()).unwrap();
         indexer.dump_store_to_db().await.unwrap();
         let rows = sqlx::query("SELECT * FROM contracts")
@@ -1104,6 +1181,15 @@ mod test {
             vec!["a", "b", "c"]
         );
 
+        indexer
+            .handle_node_state_indexer_event(DataProposalsFromBlock {
+                block_hash: b2.hash.clone(),
+                block_height: b2.block_height,
+                block_timestamp: b2.block_timestamp.clone(),
+                data_proposals: b2_data_proposals,
+            })
+            .await
+            .unwrap();
         indexer.handle_processed_block(b2.clone()).unwrap();
         indexer.dump_store_to_db().await.unwrap();
         let rows = sqlx::query("SELECT * FROM contracts")
@@ -1116,6 +1202,16 @@ mod test {
                 .collect::<Vec<_>>(),
             vec!["b"]
         );
+
+        indexer
+            .handle_node_state_indexer_event(DataProposalsFromBlock {
+                block_hash: b3.hash.clone(),
+                block_height: b3.block_height,
+                block_timestamp: b3.block_timestamp.clone(),
+                data_proposals: b3_data_proposals,
+            })
+            .await
+            .unwrap();
 
         indexer.handle_processed_block(b3.clone()).unwrap();
         indexer.dump_store_to_db().await.unwrap();
@@ -1135,9 +1231,42 @@ mod test {
 
     #[test_log::test(tokio::test)]
     async fn test_contracts_batched() -> Result<()> {
-        let (_c, mut indexer, b1, b2, b3) = scenario_contracts().await?;
+        let (
+            _c,
+            mut indexer,
+            (b1, b1_data_proposals),
+            (b2, b2_data_proposals),
+            (b3, b3_data_proposals),
+        ) = scenario_contracts().await?;
+        indexer
+            .handle_node_state_indexer_event(DataProposalsFromBlock {
+                block_hash: b1.hash.clone(),
+                block_height: b1.block_height,
+                block_timestamp: b1.block_timestamp.clone(),
+                data_proposals: b1_data_proposals,
+            })
+            .await
+            .unwrap();
         indexer.handle_processed_block(b1).unwrap();
+        indexer
+            .handle_node_state_indexer_event(DataProposalsFromBlock {
+                block_hash: b2.hash.clone(),
+                block_height: b2.block_height,
+                block_timestamp: b2.block_timestamp.clone(),
+                data_proposals: b2_data_proposals,
+            })
+            .await
+            .unwrap();
         indexer.handle_processed_block(b2).unwrap();
+        indexer
+            .handle_node_state_indexer_event(DataProposalsFromBlock {
+                block_hash: b3.hash.clone(),
+                block_height: b3.block_height,
+                block_timestamp: b3.block_timestamp.clone(),
+                data_proposals: b3_data_proposals,
+            })
+            .await
+            .unwrap();
         indexer.handle_processed_block(b3).unwrap();
         indexer.dump_store_to_db().await.unwrap();
 

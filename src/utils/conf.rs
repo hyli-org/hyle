@@ -142,8 +142,11 @@ pub struct Conf {
     /// Server port for the TCP API
     pub tcp_server_port: u16,
 
-    /// Whether to run the indexer
+    /// Whether to run the indexer (write to db)
     pub run_indexer: bool,
+    /// Whether to run the explorer (read from db)
+    pub run_explorer: bool,
+
     /// If running the indexer, the postgres address to connect to
     pub database_url: String,
     /// When running only the indexer, the address of the DA server to connect to
@@ -183,6 +186,7 @@ impl Conf {
             )
             .set_override_option("data_directory", data_directory)?
             .set_override_option("run_indexer", run_indexer)?
+            .set_override_option("run_explorer", run_indexer)?
             .build()?
             .try_deserialize()?;
         // Mostly for convenience, ignore ourself from the peers list

@@ -50,6 +50,7 @@ async fn test_full_settlement_flow() -> Result<()> {
     let mut builder = NodeIntegrationCtxBuilder::new().await;
     let rest_server_port = builder.conf.rest_server_port;
     builder.conf.run_indexer = true;
+    builder.conf.run_explorer = true;
     builder.conf.database_url = format!(
         "postgres://postgres:postgres@localhost:{}/postgres",
         pg.get_host_port_ipv4(5432).await.unwrap()
@@ -172,6 +173,7 @@ async fn build_hyle_node() -> Result<(String, NodeIntegrationCtx)> {
     let mut builder = NodeIntegrationCtxBuilder::new().await;
     let rest_port = builder.conf.rest_server_port;
     builder.conf.run_indexer = true;
+    builder.conf.run_explorer = true;
     builder.conf.database_url = format!(
         "postgres://postgres:postgres@localhost:{}/postgres",
         pg.get_host_port_ipv4(5432).await.unwrap()

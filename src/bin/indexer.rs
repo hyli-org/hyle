@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
     let mut config =
-        conf::Conf::new(args.config_file, None, Some(true)).context("reading config file")?;
+        conf::Conf::new(args.config_file, None, None).context("reading config file")?;
     // The indexer binary runs none of the consensus/p2p layer
     config.p2p.mode = P2pMode::None;
     // The indexer binary skips the TCP server

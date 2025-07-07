@@ -1,4 +1,4 @@
-use super::IndexerApiState;
+use super::ExplorerApiState;
 use utoipa::OpenApi;
 
 #[derive(Debug, serde::Deserialize)]

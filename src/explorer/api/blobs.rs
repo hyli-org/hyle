@@ -1,4 +1,4 @@
-use super::{IndexerApiState, TxHashDb};
+use super::{ExplorerApiState, TxHashDb};
 use api::APIBlob;
 use axum::{
     extract::{Path, State},
@@ -48,7 +48,7 @@ impl From<BlobDb> for APIBlob {
 )]
 pub async fn get_blobs_by_tx_hash(
     Path(tx_hash): Path<String>,
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<Vec<APIBlob>>, StatusCode> {
     let blobs = log_error!(
         sqlx::query_as::<_, BlobDb>(
@@ -106,7 +106,7 @@ GROUP BY
 )]
 pub async fn get_blob(
     Path((tx_hash, blob_index)): Path<(String, i32)>,
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<APIBlob>, StatusCode> {
     let blob = log_error!(
         sqlx::query_as::<_, BlobDb>(

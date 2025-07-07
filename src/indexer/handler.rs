@@ -1,4 +1,4 @@
-use super::api::*;
+use crate::explorer::api::*;
 use crate::model::*;
 use crate::node_state::module::NodeStateEvent;
 use anyhow::{bail, Context, Error, Result};
@@ -150,7 +150,7 @@ impl Indexer {
             return Ok(());
         }
 
-        let mut transaction = self.state.db.begin().await?;
+        let mut transaction = self.db.begin().await?;
 
         // Insert blocks into the database
         if !self.handler_store.blocks.is_empty() {
@@ -514,6 +514,11 @@ impl Indexer {
                         contract_name,
                     } = s;
 
+                    info!(
+                        "Inserting contract {} with tx hash {} and parent data proposal hash {}",
+                        contract_name, tx_hash.0, parent_data_proposal_hash.0
+                    );
+
                     b.push_bind(tx_hash)
                         .push_bind(parent_data_proposal_hash)
                         .push_bind(verifier)
@@ -678,7 +683,7 @@ impl Indexer {
     }
 
     pub async fn handle_mempool_status_event(&mut self, event: MempoolStatusEvent) -> Result<()> {
-        let mut transaction = self.state.db.begin().await?;
+        let mut transaction = self.db.begin().await?;
         match event {
             MempoolStatusEvent::WaitingDissemination {
                 parent_data_proposal_hash,

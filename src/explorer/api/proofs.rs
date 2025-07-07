@@ -1,4 +1,4 @@
-use super::{BlockPagination, IndexerApiState, TransactionDb};
+use super::{BlockPagination, ExplorerApiState, TransactionDb};
 use api::APITransaction;
 use axum::{
     extract::{Path, Query, State},
@@ -22,7 +22,7 @@ use hyle_modules::log_error;
 )]
 pub async fn get_proofs(
     Query(pagination): Query<BlockPagination>,
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<Vec<APITransaction>>, StatusCode> {
     let transactions = log_error!(
         match pagination.start_block {
@@ -74,7 +74,7 @@ pub async fn get_proofs(
 )]
 pub async fn get_proofs_by_height(
     Path(height): Path<i64>,
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<Vec<APITransaction>>, StatusCode> {
     let transactions = log_error!(
         sqlx::query_as::<_, TransactionDb>(
@@ -110,7 +110,7 @@ pub async fn get_proofs_by_height(
 )]
 pub async fn get_proof_with_hash(
     Path(tx_hash): Path<String>,
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<APIProofDetails>, StatusCode> {
     let transaction: Result<APIProofDetails, sqlx::Error> = log_error!(
         sqlx::query(

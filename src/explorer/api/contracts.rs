@@ -1,4 +1,4 @@
-use super::{IndexerApiState, TxHashDb};
+use super::{ExplorerApiState, TxHashDb};
 use api::{APIContract, APIContractState};
 use axum::{
     extract::{Path, State},
@@ -66,7 +66,7 @@ impl From<ContractStateDb> for APIContractState {
     )
 )]
 pub async fn list_contracts(
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<Vec<APIContract>>, StatusCode> {
     let contract = log_error!(
         sqlx::query_as::<_, ContractDb>(
@@ -120,7 +120,7 @@ pub async fn list_contracts(
 )]
 pub async fn get_contract(
     Path(contract_name): Path<String>,
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<APIContract>, StatusCode> {
     let contract = log_error!(
         sqlx::query_as::<_, ContractDb>(
@@ -180,7 +180,7 @@ pub async fn get_contract(
 )]
 pub async fn get_contract_state_by_height(
     Path((contract_name, height)): Path<(String, i64)>,
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<APIContractState>, StatusCode> {
     let contract = log_error!(
         sqlx::query_as::<_, ContractStateDb>(

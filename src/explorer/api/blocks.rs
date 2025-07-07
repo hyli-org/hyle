@@ -1,4 +1,4 @@
-use super::{BlockPagination, IndexerApiState};
+use super::{BlockPagination, ExplorerApiState};
 use api::APIBlock;
 use axum::{
     extract::{Path, Query, State},
@@ -44,7 +44,7 @@ impl From<BlockDb> for APIBlock {
 )]
 pub async fn get_blocks(
     Query(pagination): Query<BlockPagination>,
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<Vec<APIBlock>>, StatusCode> {
     let blocks = log_error!(match pagination.start_block {
         Some(start_block) => sqlx::query_as::<_, BlockDb>(
@@ -74,7 +74,7 @@ pub async fn get_blocks(
     )
 )]
 pub async fn get_last_block(
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<APIBlock>, StatusCode> {
     let block = log_error!(
         sqlx::query_as::<_, BlockDb>("SELECT * FROM blocks ORDER BY height DESC LIMIT 1")
@@ -104,7 +104,7 @@ pub async fn get_last_block(
 )]
 pub async fn get_block(
     Path(height): Path<i64>,
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<APIBlock>, StatusCode> {
     let block = log_error!(
         sqlx::query_as::<_, BlockDb>("SELECT * FROM blocks WHERE height = $1")
@@ -135,7 +135,7 @@ pub async fn get_block(
 )]
 pub async fn get_block_by_hash(
     Path(hash): Path<String>,
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<APIBlock>, StatusCode> {
     let block = log_error!(
         sqlx::query_as::<_, BlockDb>("SELECT * FROM blocks WHERE hash = $1")

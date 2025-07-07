@@ -1,4 +1,4 @@
-use super::IndexerApiState;
+use super::ExplorerApiState;
 use axum::{extract::State, http::StatusCode, Json};
 use hyle_model::api::{NetworkStats, ProofStat};
 
@@ -25,7 +25,7 @@ struct PeakStat {
     )
 )]
 pub async fn get_stats(
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<NetworkStats>, StatusCode> {
     let total_transactions = log_error!(
         sqlx::query_scalar("SELECT count(*) as txs FROM transactions")
@@ -197,7 +197,7 @@ pub async fn get_stats(
     )
 )]
 pub async fn get_proof_stats(
-    State(state): State<IndexerApiState>,
+    State(state): State<ExplorerApiState>,
 ) -> Result<Json<Vec<ProofStat>>, StatusCode> {
     let transactions = log_error!(
         sqlx::query_as::<_, ProofStat>(

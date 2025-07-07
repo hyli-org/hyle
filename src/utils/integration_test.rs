@@ -18,6 +18,7 @@ use crate::bus::metrics::BusMetrics;
 use crate::bus::{bus_client, BusClientReceiver, SharedMessageBus};
 use crate::consensus::Consensus;
 use crate::data_availability::DataAvailability;
+use crate::explorer::Explorer;
 use crate::genesis::{Genesis, GenesisEvent};
 use crate::indexer::Indexer;
 use crate::mempool::Mempool;
@@ -277,6 +278,15 @@ impl NodeIntegrationCtx {
 
         if config.run_indexer {
             Self::build_module::<Indexer>(
+                &mut handler,
+                &ctx,
+                (config.clone(), ctx.api.clone()),
+                &mut mocks,
+            )
+            .await?;
+        }
+        if config.run_explorer {
+            Self::build_module::<Explorer>(
                 &mut handler,
                 &ctx,
                 (config.clone(), ctx.api.clone()),

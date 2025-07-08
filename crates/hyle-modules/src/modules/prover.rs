@@ -55,6 +55,19 @@ pub struct RouterData {
 }
 
 #[derive(Default, BorshSerialize, BorshDeserialize)]
+pub struct OldAutoProverStore<Contract> {
+    // These are other unsettled transactions that are waiting to be proved
+    unsettled_txs: Vec<(BlobTransaction, TxContext, TxId)>,
+    // These are the transactions that are currently being proved
+    proving_txs: Vec<(BlobTransaction, TxContext, TxId)>,
+    state_history: BTreeMap<TxHash, Contract>,
+    tx_chain: Vec<TxHash>,
+    buffered_blobs: Vec<(Vec<BlobIndex>, BlobTransaction, TxContext)>,
+    buffered_blocks_count: u32,
+    batch_id: u64,
+}
+
+#[derive(Default, BorshSerialize, BorshDeserialize)]
 pub struct AutoProverStore<Contract> {
     // These are other unsettled transactions that are waiting to be proved
     unsettled_txs: Vec<(BlobTransaction, TxContext, TxId)>,
@@ -120,8 +133,20 @@ where
             .data_directory
             .join(format!("autoprover_{}.bin", ctx.contract_name).as_str());
 
-        let mut store = match Self::load_from_disk::<AutoProverStore<Contract>>(file.as_path()) {
-            Some(store) => store,
+        let mut store = match Self::load_from_disk::<OldAutoProverStore<Contract>>(file.as_path()) {
+            Some(store) => AutoProverStore::<Contract> {
+                unsettled_txs: store.unsettled_txs,
+                proving_txs: store.proving_txs,
+                state_history: store.state_history,
+                tx_chain: store.tx_chain,
+                buffered_blobs: store.buffered_blobs,
+                buffered_blocks_count: store.buffered_blocks_count,
+                batch_id: store.batch_id,
+                #[cfg(test)]
+                next_height: BlockHeight(1),
+                #[cfg(not(test))]
+                next_height: BlockHeight(0),
+            },
             None => AutoProverStore::<Contract> {
                 unsettled_txs: vec![],
                 proving_txs: vec![],

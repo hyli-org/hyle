@@ -270,7 +270,7 @@ where
                 self.store.next_height
             );
             return Ok(());
-        } else if block.block_height.0 > self.store.next_height.0 {
+        } else if block.block_height.0 > self.store.next_height.0 && self.store.next_height.0 > 0 {
             bail!(
                 "Received future block {} but expected block {}",
                 block.block_height,

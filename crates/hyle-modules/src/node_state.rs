@@ -922,20 +922,24 @@ impl NodeState {
                 SettlementStatus::SettleAsSuccess | SettlementStatus::SettleAsFailed => {
                     return settlement_result;
                 }
-                // SettlementStatus::NotReadyToSettle | SettlementStatus::Idle => continue,
-                _ => continue,
+                SettlementStatus::NotReadyToSettle | SettlementStatus::Unknown => continue,
             }
         }
 
         // Feature flag
-        if current_height > BlockHeight(1_400_000) {
+        if current_height > BlockHeight(1_500_000) {
             // If we end up here we didn't manage to settle all blobs
             // We update the status of the contract in contract_changes; so that we can move on in recursion to find valid failing blobs.
             contract_changes
                 .entry(contract_name.clone())
                 .and_modify(|(contract_status, ..)| {
                     *contract_status = ContractStatus::UnknownState;
-                });
+                })
+                .or_insert((
+                    ContractStatus::UnknownState,
+                    ModifiedContractFields::all(),
+                    vec![],
+                ));
 
             let remaining_settlement = Self::settle_blobs_recursively(
                 current_height,

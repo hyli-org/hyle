@@ -1808,7 +1808,7 @@ async fn test_early_settle_as_failed_when_proof_has_success_false() {
     let blob_tx_hash = blob_tx.hashed();
 
     // Submit the transaction (it should be ready to settle)
-    let block = state.craft_block_and_handle(1, vec![blob_tx.clone().into()]);
+    let block = state.craft_block_and_handle(2_000_000, vec![blob_tx.clone().into()]);
 
     // Verify transaction is in unsettled state
     assert!(state.unsettled_transactions.get(&blob_tx_hash).is_some());
@@ -1821,7 +1821,7 @@ async fn test_early_settle_as_failed_when_proof_has_success_false() {
     let verified_proof = new_proof_tx(&c2, &hyle_output, &blob_tx_hash);
 
     // Submit the proof
-    let block = state.craft_block_and_handle(2, vec![verified_proof.into()]);
+    let block = state.craft_block_and_handle(2_000_001, vec![verified_proof.into()]);
 
     // Verify that the transaction was settled as failed
     assert_eq!(block.failed_txs.len(), 1);
@@ -1895,7 +1895,7 @@ async fn test_failure_proof_must_wait_for_previous_blobs() {
 
     // Submit the failure proof in block 2
     let block_2 = state.craft_block_and_handle(
-        2,
+        2_000_000,
         vec![
             proof_tx_success_different_next_state.into(),
             proof_tx_fail.into(),
@@ -1922,7 +1922,7 @@ async fn test_failure_proof_must_wait_for_previous_blobs() {
         .is_some());
 
     // Submit the success proof in block 3
-    let block_3 = state.craft_block_and_handle(3, vec![proof_tx_success.into()]);
+    let block_3 = state.craft_block_and_handle(2_000_001, vec![proof_tx_success.into()]);
 
     // NOW the transaction should fail because blob 1 has a failure proof
     assert_eq!(

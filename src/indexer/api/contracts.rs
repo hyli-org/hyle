@@ -73,28 +73,16 @@ pub async fn list_contracts(
             r#"
         SELECT
           c.*,
-          COUNT(t.*)                             			          AS total_tx,
-          COUNT(t.*)
-            FILTER (WHERE t.transaction_status = 'sequenced')   AS unsettled_tx,
-          (
-            SELECT min(bl.height)
-            FROM blocks bl
-            JOIN transactions t2 ON t2.block_hash = bl.hash
-            WHERE t2.transaction_status = 'sequenced'
-              AND EXISTS (
-                SELECT 1 FROM blobs b2
-                WHERE b2.parent_dp_hash = t2.parent_dp_hash
-                  AND b2.tx_hash = t2.tx_hash
-                  AND b2.contract_name = c.contract_name
-              )
-          ) AS earliest_unsettled
+          COUNT(tx_c.*) AS total_tx,
+          COUNT(t.*) FILTER (WHERE t.transaction_status = 'sequenced') AS unsettled_tx,
+          min(t.block_height) FILTER (WHERE t.transaction_status = 'sequenced') as earliest_unsettled
         FROM contracts AS c
         LEFT JOIN txs_contracts as tx_c
           on tx_c.contract_name = c.contract_name
         LEFT JOIN transactions AS t
           ON t.parent_dp_hash = tx_c.parent_dp_hash
-         AND t.tx_hash       = tx_c.tx_hash
-        GROUP BY c.contract_name;
+          AND t.tx_hash       = tx_c.tx_hash
+        GROUP BY c.contract_name
 "#
         )
         .fetch_all(&state.db)

@@ -7,6 +7,7 @@ use serde_with::DurationMilliSeconds;
 use std::{collections::HashMap, fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
 use strum_macros::IntoStaticStr;
 
+use crate::google_cloud_storage_client::GCSConf;
 use crate::indexer::IndexerConf;
 
 #[serde_as]
@@ -156,6 +157,9 @@ pub struct Conf {
 
     /// Configuration for the indexer module
     pub indexer: IndexerConf,
+
+    /// Google Cloud Storage Client configuration
+    pub gcs: GCSConf,
 }
 
 impl Conf {

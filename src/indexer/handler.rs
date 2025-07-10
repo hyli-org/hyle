@@ -1,4 +1,5 @@
 use super::api::*;
+use crate::google_cloud_storage_client::GCSRequest;
 use crate::model::*;
 use crate::node_state::module::NodeStateEvent;
 use anyhow::{bail, Context, Error, Result};
@@ -38,13 +39,6 @@ pub struct TxDataStore {
     pub contract_name: String,
     pub blob_data: Vec<u8>,
     pub verified: bool,
-}
-
-#[derive(Debug)]
-pub struct TxProofStore {
-    pub tx_hash: TxHashDb,
-    pub parent_data_proposal_hash: DataProposalHashDb,
-    pub proof: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -93,7 +87,6 @@ pub(crate) struct IndexerHandlerStore {
     blocks: Vec<Arc<Block>>,
     block_txs: HashMap<TxId, (i32, Arc<Block>, Transaction)>,
     tx_data: Vec<TxDataStore>,
-    tx_data_proofs: Vec<TxProofStore>,
     transactions_events: Vec<TxEventStore>,
     sql_updates: Vec<
         sqlx::query::Query<
@@ -114,7 +107,6 @@ impl std::fmt::Debug for IndexerHandlerStore {
             .field("blocks", &self.blocks.len())
             .field("block_txs", &self.block_txs.len())
             .field("tx_data", &self.tx_data.len())
-            .field("tx_data_proofs", &self.tx_data_proofs.len())
             .field("transactions_events", &self.transactions_events.len())
             .field("sql_updates", &self.sql_updates.len())
             .field("contracts", &self.contracts.len())
@@ -152,7 +144,6 @@ impl Indexer {
         self.handler_store.blocks.is_empty()
             && self.handler_store.block_txs.is_empty()
             && self.handler_store.tx_data.is_empty()
-            && self.handler_store.tx_data_proofs.is_empty()
             && self.handler_store.transactions_events.is_empty()
             && self.handler_store.sql_updates.is_empty()
             && self.handler_store.contracts.is_empty()
@@ -393,54 +384,6 @@ impl Indexer {
                             "Inserting txs_contracts batch {} of {}",
                             batch_idx + 1,
                             tx_contracts_chunks.len()
-                        )
-                    })?;
-            }
-        }
-
-        // Insert proofs into the database with batching
-        if !self.handler_store.tx_data_proofs.is_empty() {
-            const PROOFS_PARAMS: usize = 3; // parent_dp_hash, tx_hash, proof
-            let proofs_batch_size = calculate_optimal_batch_size(PROOFS_PARAMS);
-            let tx_data_proofs = std::mem::take(&mut self.handler_store.tx_data_proofs);
-            let chunks: Vec<_> = tx_data_proofs.chunks(proofs_batch_size).collect();
-
-            info!(
-                "Inserting {} proofs in {} batches of up to {} items each (calculated from {} params per item)",
-                tx_data_proofs.len(),
-                chunks.len(),
-                proofs_batch_size,
-                PROOFS_PARAMS
-            );
-
-            for (batch_idx, chunk) in chunks.iter().enumerate() {
-                let mut query_builder = QueryBuilder::<Postgres>::new(
-                    "INSERT INTO proofs (parent_dp_hash, tx_hash, proof) ",
-                );
-
-                query_builder.push_values(chunk.iter(), |mut b, s| {
-                    let TxProofStore {
-                        tx_hash,
-                        parent_data_proposal_hash,
-                        proof,
-                    } = s;
-
-                    b.push_bind(parent_data_proposal_hash)
-                        .push_bind(tx_hash)
-                        .push_bind(proof);
-                });
-
-                query_builder.push(" ON CONFLICT(parent_dp_hash, tx_hash) DO NOTHING");
-
-                query_builder
-                    .build()
-                    .execute(&mut *transaction)
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "Inserting proofs batch {} of {}",
-                            batch_idx + 1,
-                            chunks.len()
                         )
                     })?;
             }
@@ -897,20 +840,26 @@ impl Indexer {
                     });
             }
             TransactionData::VerifiedProof(tx_data) => {
-                // Then insert the proof in to the proof table.
-                match &tx_data.proof {
-                    Some(proof_data) => {
-                        self.handler_store.tx_data_proofs.push(TxProofStore {
-                            tx_hash: tx_hash.clone(),
-                            parent_data_proposal_hash: parent_data_proposal_hash.clone(),
-                            proof: proof_data.0.clone(),
-                        });
-                    }
-                    None => {
-                        tracing::trace!(
-                            "Verified proof TX {:?} does not contain a proof",
-                            &tx_hash
-                        );
+                // Only pushing proof if proof persistance is enabled.
+                if self.conf.indexer.persist_proofs {
+                    // Then insert the proof in to the proof table.
+                    match &tx_data.proof {
+                        Some(proof_data) => {
+                            _ = log_error!(
+                                self.bus.send(GCSRequest::ProofUpload {
+                                    proof: proof_data.0.clone(),
+                                    parent_data_proposal_hash: parent_data_proposal_hash.0.clone(),
+                                    tx_hash: tx_hash.0.clone(),
+                                }),
+                                "Sending proof upload request to GCS"
+                            );
+                        }
+                        None => {
+                            tracing::trace!(
+                                "Verified proof TX {:?} does not contain a proof",
+                                &tx_hash
+                            );
+                        }
                     }
                 };
             }

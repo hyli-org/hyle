@@ -3,6 +3,7 @@
 mod api;
 mod handler;
 
+use crate::google_cloud_storage_client::GCSRequest;
 use crate::utils::conf::Conf;
 use crate::{model::*, utils::conf::SharedConf};
 use anyhow::{Context, Result};
@@ -46,6 +47,7 @@ module_bus_client! {
 #[derive(Debug)]
 struct IndexerBusClient {
     sender(NodeStateEvent),
+    sender(GCSRequest),
     receiver(DataEvent),
     receiver(MempoolStatusEvent),
 }
@@ -60,7 +62,6 @@ pub struct IndexerApiState {
     new_sub_sender: mpsc::Sender<(ContractName, WebSocket)>,
 }
 
-#[derive(Debug)]
 pub struct Indexer {
     bus: IndexerBusClient,
     state: IndexerApiState,
@@ -74,6 +75,7 @@ pub struct Indexer {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct IndexerConf {
     query_buffer_size: usize,
+    pub persist_proofs: bool,
 }
 
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./src/indexer/migrations");
@@ -411,6 +413,7 @@ mod test {
         let conf = Conf {
             indexer: IndexerConf {
                 query_buffer_size: 100,
+                persist_proofs: false,
             },
             ..Conf::default()
         };

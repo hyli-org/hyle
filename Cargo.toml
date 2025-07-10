@@ -147,6 +147,9 @@ utoipa-axum = { version = "0.2.0" }
 testcontainers-modules = { version = "0.12.1", features = ["postgres"] }
 toml = "0.8.22"
 
+# GCS
+google-cloud-storage = "0.24.0"
+
 # We force zip version here as later version is not compatible with utoipa-swagger-ui
 zip = "=3.0.0"
 seq-macro = "0.3.6"

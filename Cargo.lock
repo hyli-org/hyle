@@ -4817,6 +4817,7 @@ dependencies = [
  "dhat",
  "fjall",
  "futures",
+ "google-cloud-storage",
  "hex",
  "hyle-amm",
  "hyle-client-sdk",

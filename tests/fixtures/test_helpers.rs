@@ -80,6 +80,7 @@ impl Default for ConfMaker {
             stakers
         };
         default.genesis.keep_tokens_in_faucet = true; // Keep faucet tokens for tests
+        default.indexer.persist_proofs = false; // Disable proof persistence for tests
 
         default.run_indexer = false; // disable indexer by default to avoid needed PG
 

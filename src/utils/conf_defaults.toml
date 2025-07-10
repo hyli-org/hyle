@@ -80,3 +80,8 @@ events = ["node_state", "new_block", "new_tx"]
 
 [indexer]
 query_buffer_size = 100
+persist_proofs = true
+
+[gcs.proof]
+bucket = "testnet_proofs"
+prefix = "local"

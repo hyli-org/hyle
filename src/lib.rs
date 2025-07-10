@@ -22,6 +22,7 @@ pub mod consensus;
 pub mod data_availability;
 pub mod entrypoint;
 pub mod genesis;
+pub mod google_cloud_storage_client;
 pub mod indexer;
 pub mod mempool;
 pub mod node_state;

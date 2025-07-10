@@ -45,15 +45,6 @@ CREATE TABLE blobs (
 );
 create index idx_blobs_contract_name on blobs(contract_name);
 
--- This table stores actual proofs, which may not be present in all indexers
-CREATE TABLE proofs (
-    tx_hash TEXT NOT NULL,    
-    parent_dp_hash TEXT NOT NULL,    
-    proof BYTEA NOT NULL,
-    FOREIGN KEY (parent_dp_hash, tx_hash) REFERENCES transactions(parent_dp_hash, tx_hash) ON DELETE CASCADE,
-    PRIMARY KEY (tx_hash, parent_dp_hash)
-);
-
 -- This table stores one line for each hyle output in a VerifiedProof
 CREATE TABLE blob_proof_outputs (
     blob_parent_dp_hash  TEXT NOT NULL,         -- Foreign key linking to the BlobTransactions    
@@ -105,8 +96,6 @@ CREATE TABLE transaction_state_events (
 CREATE INDEX idx_bpo_on_proof_tx
   ON blob_proof_outputs (proof_tx_hash);
 
-CREATE INDEX idx_proofs_on_tx_hash
-  ON proofs (tx_hash);
 
 CREATE INDEX idx_bpo_prooftx_contract
   ON blob_proof_outputs (proof_tx_hash, contract_name);

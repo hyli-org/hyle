@@ -20,23 +20,18 @@ path = "examples/host.rs"
 
 [dependencies]
 sdk = { workspace = true }
-serde_json = "1.0"
-serde = { version = "1.0", default-features = false, features = [
-  "derive",
-  "alloc",
-] }
-anyhow = "1.0.98"
-borsh = { version = "1.5.6", features = ["derive"] }
-hex = "0.4.3"
+serde_json = { workspace = true }
+serde = { workspace = true, features = ["derive", "alloc"] }
+anyhow = { workspace = true }
+borsh = { workspace = true, features = ["derive"] }
+hex = { workspace = true }
 
-risc0-zkvm = { version = "2.1", default-features = false, optional = true, features = [
-  'std',
-] }
+risc0-zkvm = { workspace = true, optional = true, features = ['std'] }
 client-sdk = { workspace = true, features = [
   "risc0",
   "indexer",
 ], optional = true }
-sha2 = "=0.10.8" # precompile patched at workspace root
+sha2 = { workspace = true }
 
 [dev-dependencies]
 # Activate client in examples.
@@ -44,10 +39,10 @@ sdk = { workspace = true, features = ["full-model", "tracing"] }
 hyle-hydentity = { path = ".", features = ["client"] }
 client-sdk = { workspace = true, features = ["risc0", "rest", "indexer"] }
 
-clap = { version = "4.5", features = ["derive"] }
-tokio = { version = "1.45.1", features = ["full", "tracing"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-mockall = "0.13.0"
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+mockall = { workspace = true }
 
 [features]
 default = []

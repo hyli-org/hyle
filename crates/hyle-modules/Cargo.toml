@@ -9,59 +9,53 @@ repository = { workspace = true }
 rust-version = { workspace = true }
 
 [dependencies]
-sdk = { workspace = true, default-features = false, features = ["full-model"] }
+sdk = { workspace = true, features = ["full-model"] }
 client-sdk = { workspace = true, features = ["rest", "indexer"] }
 hyle-net = { workspace = true }
 hyle-verifiers = { workspace = true }
 
-sha3 = "0.10.8"
-anyhow = "1.0.98"
-borsh = "1.5.6"
-serde = "1.0"
-serde_json = { version = "1" }
-tracing = "0.1"
-assertables = { version = "9.8.0" }
-anymap = { version = "0.12.1" }
-syn = { version = "2.0.104" }
-quote = { version = "1.0.39" }
-rand = { version = "0.8.5" }
-futures = { version = "0.3.31" }
-tracing-subscriber = { version = "0.3", default-features = false, features = [
+sha3 = { workspace = true }
+anyhow = { workspace = true }
+borsh = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+assertables = { workspace = true }
+anymap = { workspace = true }
+syn = { workspace = true }
+quote = { workspace = true }
+rand = { workspace = true }
+futures = { workspace = true }
+tracing-subscriber = { workspace = true, features = [
   "env-filter",
   "fmt",
   "json",
 ] }
-paste = { version = "1.0.15" }
-hex = { version = "0.4.3" }
+paste = { workspace = true }
+hex = { workspace = true }
 
-tokio = { version = "1.45.1", features = ["full", "tracing"] }
-tokio-util = { version = "0.7.14" }
+tokio = { workspace = true, features = ["full", "tracing"] }
+tokio-util = { workspace = true }
 
-axum = { version = "0.8.4", features = ["ws"] }
+axum = { workspace = true, features = ["ws"] }
 
-utoipa = { version = "5.3.1" }
-utoipa-axum = { version = "0.2.0" }
-utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
+utoipa = { workspace = true }
+utoipa-axum = { workspace = true }
+utoipa-swagger-ui = { workspace = true, features = ["axum"] }
 
-tower-http = { version = "0.6.5", features = ["trace", "cors", "catch-panic"] }
-prometheus = { version = "0.13.4" }
-opentelemetry = { version = "0.28" }
+tower-http = { workspace = true, features = ["trace", "cors", "catch-panic"] }
+prometheus = { workspace = true }
+opentelemetry = { workspace = true }
 
-test-log = { version = "0.2.17", features = [
-  "color",
-  "trace",
-], default-features = false, optional = true }
-indexmap = "2.9.0"
+test-log = { workspace = true, features = ["color", "trace"], optional = true }
+indexmap = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3.20.0"
+tempfile = { workspace = true }
 hyle-model = { workspace = true }
-sha2 = "=0.10.8"
-secp256k1 = { version = "0.31.0", features = ["rand", "global-context"] }
-test-log = { version = "0.2.17", features = [
-  "color",
-  "trace",
-], default-features = false }
+sha2 = { workspace = true }
+secp256k1 = { workspace = true, features = ["rand", "global-context"] }
+test-log = { workspace = true, features = ["color", "trace"] }
 hydentity = { workspace = true, features = ["client"] }
 
 [features]

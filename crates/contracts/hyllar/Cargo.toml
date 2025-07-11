@@ -21,18 +21,13 @@ path = "examples/host.rs"
 
 [dependencies]
 sdk = { workspace = true }
-serde = { version = "1.0", default-features = false, features = [
-  "derive",
-  "alloc",
-] }
-anyhow = "1.0.98"
-sha2 = "=0.10.8" # precompile patched at workspace root
-borsh = { version = "1.5.6", features = ["derive"] }
-serde_with = "3.13.0"
+serde = { workspace = true, features = ["derive", "alloc"] }
+anyhow = { workspace = true }
+sha2 = { workspace = true }
+borsh = { workspace = true, features = ["derive"] }
+serde_with = { workspace = true }
 
-risc0-zkvm = { version = "2.1", default-features = false, optional = true, features = [
-  'std',
-] }
+risc0-zkvm = { workspace = true, optional = true, features = ['std'] }
 client-sdk = { workspace = true, features = [
   "risc0",
   "rest",
@@ -43,12 +38,9 @@ client-sdk = { workspace = true, features = [
 # Active client feature for tests
 hyle-hyllar = { path = ".", features = ["client"] }
 
-tokio = { version = "1.45.1", features = ["full", "tracing"] }
-risc0-zkvm = { version = "2.1", default-features = false, features = [
-  'std',
-  'prove',
-] }
-mockall = "0.13.0"
+tokio = { workspace = true, features = ["full", "tracing"] }
+risc0-zkvm = { workspace = true, features = ['std', 'prove'] }
+mockall = { workspace = true }
 
 [features]
 default = []

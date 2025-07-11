@@ -8,5 +8,5 @@ rust-version.workspace = true
 
 [dependencies]
 hyle-verifiers = { workspace = true }
-tracing = { version = "0.1", features = ["log"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = { workspace = true, features = ["log"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

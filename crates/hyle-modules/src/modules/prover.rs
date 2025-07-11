@@ -25,6 +25,11 @@ use tracing::{debug, error, info, warn};
 
 use super::prover_metrics::AutoProverMetrics;
 
+enum UnsettledTxSource {
+    Proving,
+    Unsettled,
+}
+
 /// `AutoProver` is a module that handles the proving of transactions
 /// It listens to the node state events and processes all blobs in the block's transactions
 /// for a given contract.
@@ -817,7 +822,7 @@ where
     }
 
     fn settle_tx_failed(&mut self, replay_from: &mut Option<usize>, tx: &TxHash) -> Result<()> {
-        if let Some(pos) = self.remove_from_unsettled_txs(tx) {
+        if let Some((source, pos)) = self.remove_from_unsettled_txs(tx) {
             info!(
                 cn =% self.ctx.contract_name,
                 tx_hash =% tx,
@@ -828,7 +833,7 @@ where
             self.store.tx_chain.retain(|h| h != tx);
             if found.is_some() {
                 *replay_from = Some(std::cmp::min(replay_from.unwrap_or(pos), pos));
-                self.clear_state_history_after_failed(pos)?;
+                self.clear_state_history_after_failed(source, pos)?;
             } else {
                 debug!(
                     cn =% self.ctx.contract_name,
@@ -841,7 +846,7 @@ where
         Ok(())
     }
 
-    fn remove_from_unsettled_txs(&mut self, hash: &TxHash) -> Option<usize> {
+    fn remove_from_unsettled_txs(&mut self, hash: &TxHash) -> Option<(UnsettledTxSource, usize)> {
         let tx = self
             .store
             .proving_txs
@@ -852,7 +857,7 @@ where
             self.store
                 .buffered_blobs
                 .retain(|(_, t, _)| t.hashed() != *hash);
-            return Some(pos);
+            return Some((UnsettledTxSource::Proving, pos));
         } else {
             let tx = self
                 .store
@@ -861,7 +866,7 @@ where
                 .position(|(t, _, _)| t.hashed() == *hash);
             if let Some(pos) = tx {
                 self.store.unsettled_txs.remove(pos);
-                return Some(pos);
+                return Some((UnsettledTxSource::Unsettled, pos));
             }
         }
         None
@@ -914,15 +919,34 @@ where
         None
     }
 
-    fn clear_state_history_after_failed(&mut self, idx: usize) -> Result<()> {
-        for (tx, _, _) in self.store.proving_txs.clone().iter().skip(idx) {
-            debug!(
-                cn =% self.ctx.contract_name,
-                tx_hash =% tx.hashed(),
-                "🔥 Re-execute tx after failure, removing state history for tx {}",
-                tx.hashed()
-            );
-            self.store.state_history.remove(&tx.hashed());
+    fn clear_state_history_after_failed(
+        &mut self,
+        source: UnsettledTxSource,
+        idx: usize,
+    ) -> Result<()> {
+        match source {
+            UnsettledTxSource::Proving => {
+                for (tx, _, _) in self.store.proving_txs.iter().skip(idx) {
+                    debug!(
+                        cn =% self.ctx.contract_name,
+                        tx_hash =% tx.hashed(),
+                        "🔥 Re-execute tx after failure, removing state history for tx {}",
+                        tx.hashed()
+                    );
+                    self.store.state_history.remove(&tx.hashed());
+                }
+            }
+            UnsettledTxSource::Unsettled => {
+                for (tx, _, _) in self.store.unsettled_txs.iter().skip(idx) {
+                    debug!(
+                        cn =% self.ctx.contract_name,
+                        tx_hash =% tx.hashed(),
+                        "🔥 Re-execute tx after failure, removing state history for tx {}",
+                        tx.hashed()
+                    );
+                    self.store.state_history.remove(&tx.hashed());
+                }
+            }
         }
         Ok(())
     }

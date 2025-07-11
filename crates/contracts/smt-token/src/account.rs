@@ -9,8 +9,23 @@ use sparse_merkle_tree::{default_store::DefaultStore, traits::Value, SparseMerkl
 
 use crate::{FAUCET_ID, TOTAL_SUPPLY};
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct AccountSMT(pub SparseMerkleTree<SHA256Hasher, Account, DefaultStore<Account>>);
+
+impl std::fmt::Debug for AccountSMT {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "AccountSMT with {} accounts: {}",
+            self.0.store().leaves_map().len(),
+            self.get_state()
+                .iter()
+                .map(|(key, value)| format!("{}: {}", key, value.balance))
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
+    }
+}
 
 impl BorshSerialize for AccountSMT {
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {

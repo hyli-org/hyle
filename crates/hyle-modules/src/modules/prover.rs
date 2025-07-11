@@ -45,6 +45,7 @@ pub struct AutoProver<Contract: Send + Sync + Clone + 'static> {
 
     catching_txs: IndexMap<TxId, (BlobTransaction, TxContext)>,
     catching_success_txs: Vec<(BlobTransaction, TxContext)>,
+    catching_from_state: Contract,
 
     router_state: Arc<Mutex<RouterData>>,
 }
@@ -134,19 +135,22 @@ where
             .join(format!("autoprover_{}.bin", ctx.contract_name).as_str());
 
         let mut store = match Self::load_from_disk::<OldAutoProverStore<Contract>>(file.as_path()) {
-            Some(store) => AutoProverStore::<Contract> {
-                unsettled_txs: store.unsettled_txs,
-                proving_txs: store.proving_txs,
-                state_history: store.state_history,
-                tx_chain: store.tx_chain,
-                buffered_blobs: store.buffered_blobs,
-                buffered_blocks_count: store.buffered_blocks_count,
-                batch_id: store.batch_id,
-                #[cfg(test)]
-                next_height: BlockHeight(1),
-                #[cfg(not(test))]
-                next_height: BlockHeight(0),
-            },
+            Some(store) => {
+                info!("🎉 ♻️ aze");
+                AutoProverStore::<Contract> {
+                    unsettled_txs: store.unsettled_txs,
+                    proving_txs: store.proving_txs,
+                    state_history: store.state_history,
+                    tx_chain: store.tx_chain,
+                    buffered_blobs: store.buffered_blobs,
+                    buffered_blocks_count: store.buffered_blocks_count,
+                    batch_id: store.batch_id,
+                    #[cfg(test)]
+                    next_height: BlockHeight(1),
+                    #[cfg(not(test))]
+                    next_height: BlockHeight(0),
+                }
+            }
             None => AutoProverStore::<Contract> {
                 unsettled_txs: vec![],
                 proving_txs: vec![],
@@ -161,6 +165,30 @@ where
                 next_height: BlockHeight(0),
             },
         };
+
+        for (tx, contract) in store.state_history.iter() {
+            debug!(
+                cn =% ctx.contract_name,
+                tx_hash =% tx,
+                "Restored state history for tx {} at height {:?}",
+                tx,
+                contract
+            );
+        }
+
+        debug!(
+            cn =% ctx.contract_name,
+            "Restored {} unsettled transactions, {} proving transactions, {} state history entries, {} tx chain entries",
+            store.unsettled_txs.len(),
+            store.proving_txs.len(),
+            store.state_history.len(),
+            store.tx_chain.len()
+        );
+        debug!(
+            cn =% ctx.contract_name,
+            "Tx chain: {:?}",
+            store.tx_chain
+        );
 
         let infos = ctx.prover.info();
 
@@ -196,35 +224,54 @@ where
             catching_up
         );
 
-        let catching_txs = if catching_up.is_some() && !store.tx_chain.is_empty() {
-            // If we are restarting from serialized data and are catching up, we need to do some setup.
-            // Move all unsettled transactions to catching_txs and restart.
-            let mut txs = std::mem::take(&mut store.proving_txs);
-            txs.extend(std::mem::take(&mut store.unsettled_txs));
+        let (catching_txs, catching_from_state) =
+            if catching_up.is_some() && !store.tx_chain.is_empty() {
+                // If we are restarting from serialized data and are catching up, we need to do some setup.
+                // Move all unsettled transactions to catching_txs and restart.
+                let mut txs = std::mem::take(&mut store.proving_txs);
+                txs.extend(std::mem::take(&mut store.unsettled_txs));
 
-            // Clear the rest
-            store.tx_chain.truncate(1);
-            let history_start = store
-                .state_history
-                .remove(store.tx_chain.first().expect("must exist"))
-                .expect("We should have at least one transaction in the tx_chain");
-            store.state_history = BTreeMap::new();
-            store.state_history.insert(
-                store.tx_chain.last().expect("must exist").clone(),
-                history_start.clone(),
-            );
-            store.buffered_blobs.clear();
-            store.buffered_blocks_count = 0;
-            tracing::info!(
+                // Clear the rest
+                store.tx_chain.truncate(1);
+                let history_start = store
+                    .state_history
+                    .remove(store.tx_chain.first().expect("must exist"))
+                    .expect("We should have at least one transaction in the tx_chain");
+                store.state_history = BTreeMap::new();
+                store.state_history.insert(
+                    store.tx_chain.last().expect("must exist").clone(),
+                    history_start.clone(),
+                );
+                store.buffered_blobs.clear();
+                store.buffered_blocks_count = 0;
+                tracing::info!(
+                    cn =% ctx.contract_name,
+                    "Loaded {} unsettled transactions from disk, restarting from {}",
+                    txs.len(),
+                    store.tx_chain.last().expect("must exist")
+                );
+                (
+                    IndexMap::from_iter(txs.into_iter().map(|(tx, tx_ctx, id)| (id, (tx, tx_ctx)))),
+                    history_start,
+                )
+            } else {
+                (IndexMap::new(), ctx.default_state.clone())
+            };
+
+        debug!(
+            cn =% ctx.contract_name,
+            "Loaded {} catching transactions from disk: {:?}",
+            catching_txs.len(),
+            catching_txs
+        );
+        for (tx, contract) in store.state_history.iter() {
+            debug!(
                 cn =% ctx.contract_name,
-                "Loaded {} unsettled transactions from disk, restarting from {}",
-                txs.len(),
-                store.tx_chain.last().expect("must exist")
+                tx_hash =% tx,
+                "Restored state history for tx {}",
+                tx,
             );
-            IndexMap::from_iter(txs.into_iter().map(|(tx, tx_ctx, id)| (id, (tx, tx_ctx))))
-        } else {
-            IndexMap::new()
-        };
+        }
 
         Ok(AutoProver {
             bus,
@@ -235,6 +282,7 @@ where
             catching_up_state,
             catching_success_txs: vec![],
             catching_txs,
+            catching_from_state,
             router_state,
         })
     }
@@ -350,7 +398,7 @@ where
                 // Clear our flag.
                 self.catching_up = None;
 
-                let mut contract = self.ctx.default_state.clone();
+                let mut contract = self.catching_from_state.clone();
                 let last_tx_hash = blobs.last().map(|(_, tx, _)| tx.hashed());
                 for (blob_index, tx, tx_ctx) in blobs {
                     let calldata = Calldata {

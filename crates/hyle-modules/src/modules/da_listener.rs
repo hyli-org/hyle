@@ -47,6 +47,15 @@ impl Module for DAListener {
                 .join("da_listener_node_state.bin")
                 .as_path(),
         );
+        if node_state_store.current_height != BlockHeight(0) {
+            info!(
+                "📂 Loaded node state from {} at height {}",
+                ctx.data_directory
+                    .join("da_listener_node_state.bin")
+                    .display(),
+                node_state_store.current_height
+            );
+        }
 
         let node_state = NodeState {
             store: node_state_store,

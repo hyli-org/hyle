@@ -33,49 +33,47 @@ hyle-modules = { workspace = true }
 hyle-model = { workspace = true }
 smt-token = { workspace = true, features = ["client"] }
 
-anyhow = "1.0.98"
-clap = { version = "4.5.39", features = ["derive"] }
-config = { version = "0.15.9", default-features = false, features = ["toml"] }
-serde = "1.0.219"
-tracing = "0.1.41"
-tokio = "1.45.1"
-tracing-subscriber = "0.3.19"
-secp256k1 = { version = "0.31.0", features = ["global-context"] }
-sha2 = "0.10.8"
-hex = "0.4.3"
-borsh = "1.5.7"
-serde_json = "1.0.140"
+anyhow = { workspace = true }
+clap = { workspace = true }
+config = { workspace = true, features = ["toml"] }
+serde = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
+secp256k1 = { workspace = true, features = ["global-context"] }
+sha2 = { workspace = true }
+hex = { workspace = true }
+borsh = { workspace = true }
+serde_json = { workspace = true }
 
 # needs to match workspace
-opentelemetry = { version = "0.28" }
-opentelemetry_sdk = { version = "0.28" }
-opentelemetry-prometheus = { version = "0.28" }
-prometheus = { version = "0.13.4" }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-prometheus = { workspace = true }
+prometheus = { workspace = true }
 
 # Feature UI
-ratatui = { version = "0.29.0", features = ["crossterm"], optional = true }
-crossterm = { version = "0.29.0", optional = true }
+ratatui = { workspace = true, features = ["crossterm"], optional = true }
+crossterm = { workspace = true, optional = true }
 
 # GCS
-google-cloud-storage = "0.24.0"
+google-cloud-storage = { workspace = true }
 
 # Health check
-ureq = { version = "3.0.11", default-features = false, features = ["json"] }
+ureq = { workspace = true, features = ["json"] }
 
 # Rate limiting proxy (optional feature)
-axum = { version = "0.7", optional = true }
-tower_governor = { version = "0.6", optional = true }
-tower-http = { version = "0.6.5", features = [
+axum = { workspace = true, optional = true }
+tower_governor = { workspace = true, optional = true }
+tower-http = { workspace = true, features = [
     "trace",
     "cors",
     "catch-panic",
 ], optional = true }
-hyper = { version = "1.0", optional = true }
-hyper-util = { version = "0.1", optional = true }
-dashmap = { version = "6.1.0", optional = true }
-chrono = { version = "0.4.41", features = [
-    "clock",
-], default-features = false, optional = true }
+hyper = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
+dashmap = { workspace = true, optional = true }
+chrono = { workspace = true, features = ["clock"], optional = true }
 
 
 [features]
@@ -92,4 +90,3 @@ rate-proxy = [
 
 default = ["ui", "rate-proxy"]
 ui = ["dep:ratatui", "dep:crossterm"]
-

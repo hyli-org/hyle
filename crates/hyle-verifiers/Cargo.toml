@@ -12,29 +12,22 @@ rust-version = { workspace = true }
 hyle-model = { workspace = true }
 hyle-crypto = { workspace = true }
 
-serde_json = { version = "1.0.140", optional = true }
-anyhow = "1.0.98"
-borsh = "1.5.6"
+serde_json = { workspace = true, optional = true }
+anyhow = { workspace = true }
+borsh = { workspace = true, features = ["derive"] }
+tracing = { workspace = true }
+hex = { workspace = true }
+sha3 = { workspace = true }
 rand = { version = "0.9" }
-tracing = "0.1"
-hex = "0.4.3"
-sha3 = { version = "0.10.8" }
-secp256k1 = { version = "0.31.0", features = ["rand"] }
-once_cell = { version = "1.19.0", optional = true }
+secp256k1 = { workspace = true, features = ["rand"] }
+once_cell = { workspace = true, optional = true }
 
-sp1-sdk = { version = "5.0.3", default-features = false, features = [
-  "network",
-], optional = true }
-risc0-zkvm = { version = "2.1", default-features = false, features = [
-  "std",
-], optional = true }
-bincode = { version = "1.3.3", optional = true }
+sp1-sdk = { workspace = true, features = ["network"], optional = true }
+risc0-zkvm = { workspace = true, features = ["std"], optional = true }
+bincode = { workspace = true, optional = true }
 
 [dev-dependencies]
-test-log = { version = "0.2.17", features = [
-  "color",
-  "trace",
-], default-features = false }
+test-log = { workspace = true, features = ["color", "trace"] }
 
 [features]
 default = []

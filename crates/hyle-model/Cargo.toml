@@ -9,24 +9,24 @@ repository = { workspace = true }
 rust-version = "1.81"
 
 [dependencies]
-borsh = { version = "1.5.6", features = ["derive", "rc"] }
-hex = "0.4.3"
-serde = { version = "1.0", features = ["derive", "rc"] }
+borsh = { workspace = true, features = ["derive", "rc", "std"] }
+hex = { workspace = true }
+serde = { workspace = true, features = ["derive", "rc"] }
 
 readonly = "0.2.12"
-sha3 = { version = "0.10.8", optional = true }
-blst = { version = "0.3.14", optional = true }
-strum_macros = { version = "0.27.1", optional = true }
-derive_more = { version = "2.0.1", features = ["display"] }
-base64 = { version = "0.22.1", optional = true }
-anyhow = { version = "1.0.98", optional = true }
-sqlx = { version = "0.8.6", features = ["postgres"], optional = true }
-serde_with = { version = "3.13.0", features = ["hex"], optional = true }
-serde_json = { version = "1", optional = true }
-utoipa = { version = "5.3.1", optional = true }
-sha2 = { version = "=0.10.8", optional = true }                          # precompile patched at workspace root
-secp256k1 = { version = "0.31.0", optional = true }
-strum = "0.27.1"
+sha3 = { workspace = true, optional = true }
+blst = { workspace = true, optional = true }
+strum_macros = { workspace = true, optional = true }
+derive_more = { workspace = true, features = ["display"] }
+base64 = { workspace = true, optional = true }
+anyhow = { workspace = true, optional = true }
+sqlx = { workspace = true, features = ["postgres"], optional = true }
+serde_with = { workspace = true, features = ["hex"], optional = true }
+serde_json = { workspace = true, optional = true }
+utoipa = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+secp256k1 = { workspace = true, optional = true }
+strum = { workspace = true }
 
 [features]
 # disable default feature if you want minimalist definitions for contracts

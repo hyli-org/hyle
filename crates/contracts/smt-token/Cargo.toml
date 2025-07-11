@@ -19,19 +19,14 @@ name = "smt-token-runner"
 path = "examples/host.rs"
 
 [dependencies]
-anyhow = "1.0.98"
+anyhow = { workspace = true }
 sdk = { workspace = true, features = ["smt"] }
-sha2 = "=0.10.8" # precompile patched at workspace root
-borsh = { version = "1.5.5", features = ["derive"] }
-sparse-merkle-tree = "0.6.1"
-serde = { version = "1.0", default-features = false, features = [
-  "derive",
-  "alloc",
-] }
+sha2 = { workspace = true }
+borsh = { workspace = true, features = ["derive"] }
+sparse-merkle-tree = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["derive", "alloc"] }
 
-risc0-zkvm = { version = "2.1", default-features = false, optional = true, features = [
-  'std',
-] }
+risc0-zkvm = { workspace = true, optional = true, features = ['std'] }
 client-sdk = { workspace = true, features = [
   "rest",
   "indexer",
@@ -40,17 +35,11 @@ client-sdk = { workspace = true, features = [
 [dev-dependencies]
 # Active client feature for tests
 hyle-smt-token = { path = ".", features = ["client"] }
-tokio = { version = "1.45.1", features = ["full", "tracing"] }
+tokio = { workspace = true, features = ["full", "tracing"] }
 
-risc0-zkvm = { version = "2.1", default-features = false, features = [
-  'std',
-  'prove',
-] }
-mockall = "0.13.0"
-test-log = { version = "0.2.17", features = [
-  "color",
-  "trace",
-], default-features = false }
+risc0-zkvm = { workspace = true, features = ['std', 'prove'] }
+mockall = { workspace = true }
+test-log = { workspace = true, features = ["color", "trace"] }
 
 [features]
 default = []

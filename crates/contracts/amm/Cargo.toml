@@ -17,16 +17,11 @@ test = false
 [dependencies]
 sdk = { workspace = true }
 hyllar = { workspace = true }
-serde = { version = "1.0", default-features = false, features = [
-  "derive",
-  "alloc",
-] }
-anyhow = "1.0.98"
-borsh = { version = "1.5.6", features = ["derive"] }
+serde = { workspace = true, features = ["derive", "alloc"] }
+anyhow = { workspace = true }
+borsh = { workspace = true, features = ["derive"] }
 
-risc0-zkvm = { version = "2.1", default-features = false, optional = true, features = [
-  'std',
-] }
+risc0-zkvm = { workspace = true, optional = true, features = ['std'] }
 client-sdk = { workspace = true, features = ["risc0"], optional = true }
 
 [features]

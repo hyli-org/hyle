@@ -10,15 +10,15 @@ rust-version.workspace = true
 
 
 [dependencies]
-tokio = "1.45"
+tokio = { workspace = true, features = ["full", "tracing"] }
 hyllar = { workspace = true, features = ["client"] }
 hydentity = { workspace = true, features = ["client"] }
 hyle-contracts = { workspace = true }
 hyle-contract-sdk = { workspace = true, features = ["tracing"] }
 client-sdk = { workspace = true, features = ["rest", "risc0"] }
-anyhow = "1.0.98"
-borsh = "1.5.6"
-clap = { version = "4.5.38", features = ["derive"] }
-tracing = "0.1"
-tracing-subscriber = "0.3"
-rand = "0.9.0"
+anyhow = { workspace = true }
+borsh = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rand = { version = "0.9" }

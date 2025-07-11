@@ -16,23 +16,16 @@ test = false
 
 [dependencies]
 sdk = { workspace = true }
-borsh = "1.5.6"
+borsh = { workspace = true }
 
-risc0-zkvm = { version = "2.1", default-features = false, optional = true, features = [
-  'std',
-] }
-client-sdk = { workspace = true, default-features = false, features = [
-  "risc0",
-], optional = true }
-uuid = { version = "1.17.0", default-features = false }
-rand = { version = "0.9", default-features = false }
-rand_seeder = { version = "0.4.0", default-features = false }
+risc0-zkvm = { workspace = true, optional = true, features = ['std'] }
+client-sdk = { workspace = true, features = ["risc0"], optional = true }
+uuid = { workspace = true }
+rand = { version = "0.9" }
+rand_seeder = { workspace = true }
 
 [dev-dependencies]
-risc0-zkvm = { version = "2.1", default-features = false, features = [
-  'std',
-  'prove',
-] }
+risc0-zkvm = { workspace = true, features = ['std', 'prove'] }
 
 [features]
 default = []

@@ -1787,3 +1787,162 @@ async fn test_nuke_transaction_forces_target_to_fail() {
     // Verify that tx2 is no longer in unsettled transactions
     assert!(state.unsettled_transactions.get(&tx2_hash).is_none());
 }
+
+#[test_log::test(tokio::test)]
+async fn test_early_settle_as_failed_when_proof_has_success_false() {
+    let mut state = new_node_state().await;
+
+    // Register two contracts
+    let c1 = ContractName::new("contract_1");
+    let c2 = ContractName::new("contract_2");
+    let register_c1 = make_register_contract_effect(c1.clone());
+    let register_c2 = make_register_contract_effect(c2.clone());
+    state.handle_register_contract_effect(&register_c1);
+    state.handle_register_contract_effect(&register_c2);
+
+    // Create a transaction with blobs for both contracts
+    let blob_tx = BlobTransaction::new(
+        Identity::new("test@contract_1"),
+        vec![new_blob("contract_1"), new_blob("contract_2")],
+    );
+    let blob_tx_hash = blob_tx.hashed();
+
+    // Submit the transaction (it should be ready to settle)
+    let block = state.craft_block_and_handle(2_000_000, vec![blob_tx.clone().into()]);
+
+    // Verify transaction is in unsettled state
+    assert!(state.unsettled_transactions.get(&blob_tx_hash).is_some());
+    assert_eq!(block.failed_txs.len(), 0);
+    assert_eq!(block.successful_txs.len(), 0);
+
+    // Create a proof for the second blob (BlobIndex(1)) with success: false
+    let mut hyle_output = make_hyle_output(blob_tx.clone(), BlobIndex(1));
+    hyle_output.success = false; // This should cause the transaction to fail
+    let verified_proof = new_proof_tx(&c2, &hyle_output, &blob_tx_hash);
+
+    // Submit the proof
+    let block = state.craft_block_and_handle(2_000_001, vec![verified_proof.into()]);
+
+    // Verify that the transaction was settled as failed
+    assert_eq!(block.failed_txs.len(), 1);
+    assert!(block.failed_txs.contains(&blob_tx_hash));
+    assert_eq!(block.successful_txs.len(), 0);
+
+    // Verify the states didn't change (transaction failed)
+    assert_eq!(state.contracts.get(&c1).unwrap().state.0, vec![0, 1, 2, 3]);
+    assert_eq!(state.contracts.get(&c2).unwrap().state.0, vec![0, 1, 2, 3]);
+
+    // Verify the transaction was removed from unsettled transactions
+    assert!(state.unsettled_transactions.get(&blob_tx_hash).is_none());
+
+    // Verify we have the right transaction events
+    let events = &block.transactions_events[&blob_tx_hash];
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, TransactionStateEvent::SettledAsFailed)));
+}
+
+#[test_log::test(tokio::test)]
+async fn test_failure_proof_must_wait_for_previous_blobs() {
+    let mut state = new_node_state().await;
+
+    // Register a contract
+    let contract_name = ContractName::new("test_contract");
+    let register_contract = make_register_contract_effect(contract_name.clone());
+    state.handle_register_contract_effect(&register_contract);
+
+    // Create a transaction with 3 blobs for the same contract
+    let blob_tx = BlobTransaction::new(
+        Identity::new("test@test_contract"),
+        vec![
+            new_blob("test_contract"), // Blob 0
+            new_blob("test_contract"), // Blob 1
+            new_blob("test_contract"), // Blob 2
+        ],
+    );
+
+    // Submit the transaction in block 1
+    let block_1 = state.craft_block_and_handle(1, vec![blob_tx.clone().into()]);
+    assert_eq!(block_1.successful_txs.len(), 0);
+    assert_eq!(block_1.failed_txs.len(), 0);
+
+    // Create a proof for blob 0 (index 0) with success=true
+    let hyle_output_blob0_success = make_hyle_output(blob_tx.clone(), BlobIndex(0));
+    let proof_tx_success = new_proof_tx(
+        &contract_name,
+        &hyle_output_blob0_success,
+        &blob_tx.hashed(),
+    );
+
+    // Create a proof for blob 0 (index 0) with success=true and a different next_state
+    let mut hyle_output_blob0_success_different_next_state =
+        make_hyle_output(blob_tx.clone(), BlobIndex(0));
+    hyle_output_blob0_success_different_next_state.next_state = StateCommitment(vec![10, 11, 12]);
+    let proof_tx_success_different_next_state = new_proof_tx(
+        &contract_name,
+        &hyle_output_blob0_success_different_next_state,
+        &blob_tx.hashed(),
+    );
+
+    // Create a proof for blob 1 (index 1) with success=false
+    let mut hyle_output_blob1_fail = make_hyle_output(blob_tx.clone(), BlobIndex(1));
+    hyle_output_blob1_fail.success = false;
+    hyle_output_blob1_fail.initial_state = hyle_output_blob0_success.next_state.clone();
+    hyle_output_blob1_fail.next_state = hyle_output_blob1_fail.initial_state.clone(); // No state change on failure
+
+    // Prove only blob 1
+    let proof_tx_fail = new_proof_tx(&contract_name, &hyle_output_blob1_fail, &blob_tx.hashed());
+
+    // Submit the failure proof in block 2
+    let block_2 = state.craft_block_and_handle(
+        2_000_000,
+        vec![
+            proof_tx_success_different_next_state.into(),
+            proof_tx_fail.into(),
+        ],
+    );
+
+    // The transaction should NOT fail yet because blob 0 hasn't been proven with correct next_state
+    assert_eq!(
+        block_2.successful_txs.len(),
+        0,
+        "Transaction should not succeed yet"
+    );
+    assert_eq!(
+        block_2.failed_txs.len(),
+        0,
+        "Transaction should not fail yet - blob 0 not proven"
+    );
+
+    // Verify the transaction is still unsettled
+    assert_eq!(state.unsettled_transactions.len(), 1);
+    assert!(state
+        .unsettled_transactions
+        .get(&blob_tx.hashed())
+        .is_some());
+
+    // Submit the success proof in block 3
+    let block_3 = state.craft_block_and_handle(2_000_001, vec![proof_tx_success.into()]);
+
+    // NOW the transaction should fail because blob 1 has a failure proof
+    assert_eq!(
+        block_3.successful_txs.len(),
+        0,
+        "Transaction should not succeed"
+    );
+    assert_eq!(block_3.failed_txs.len(), 1, "Transaction should fail now");
+    assert_eq!(block_3.failed_txs[0], blob_tx.hashed());
+
+    // Verify the transaction was removed from unsettled
+    assert_eq!(state.unsettled_transactions.len(), 0);
+
+    // Verify the contract state didn't change (failed transactions don't change state)
+    let contract = state.contracts.get(&contract_name).unwrap();
+    assert_eq!(contract.state, StateCommitment(vec![0, 1, 2, 3])); // Original state unchanged
+
+    // Verify we have the correct events
+    let events = &block_3.transactions_events[&blob_tx.hashed()];
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, TransactionStateEvent::SettledAsFailed)));
+}

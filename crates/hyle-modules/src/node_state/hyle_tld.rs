@@ -1,6 +1,6 @@
 use crate::node_state::{
-    contract_registration::validate_contract_registration_metadata, ModifiedContractData,
-    ModifiedContractFields, NodeState, NukeTxAction,
+    contract_registration::validate_contract_registration_metadata, ContractStatus,
+    ModifiedContractData, ModifiedContractFields, NodeState, NukeTxAction,
 };
 use anyhow::{bail, Result};
 use sdk::secp256k1::CheckSecp256k1;
@@ -67,7 +67,7 @@ fn handle_register_blob(
     contract_changes.insert(
         reg.contract_name.clone(),
         (
-            Some(Contract {
+            ContractStatus::Updated(Contract {
                 name: reg.contract_name.clone(),
                 program_id: reg.program_id.clone(),
                 state: reg.state_commitment.clone(),
@@ -98,7 +98,7 @@ fn handle_delete_blob(
         contract_changes.insert(
             delete.contract_name.clone(),
             (
-                None,
+                ContractStatus::Deleted,
                 ModifiedContractFields::all(),
                 vec![SideEffect::Delete],
             ),
@@ -126,7 +126,7 @@ fn handle_update_program_id_blob(
     contract_changes
         .entry(update.contract_name.clone())
         .and_modify(|c| {
-            if let Some(contract) = c.0.as_mut() {
+            if let ContractStatus::Updated(ref mut contract) = c.0 {
                 contract.program_id = update.program_id.clone();
             }
             c.1.program_id = true;
@@ -134,7 +134,7 @@ fn handle_update_program_id_blob(
         })
         .or_insert_with(|| {
             (
-                Some(Contract {
+                ContractStatus::Updated(Contract {
                     program_id: update.program_id.clone(),
                     ..contract
                 }),
@@ -165,7 +165,7 @@ fn handle_update_timeout_window_blob(
     contract_changes
         .entry(update.contract_name.clone())
         .and_modify(|c| {
-            if let Some(contract) = c.0.as_mut() {
+            if let ContractStatus::Updated(ref mut contract) = c.0 {
                 contract.timeout_window = update.timeout_window.clone();
             }
             c.1.timeout_window = true;
@@ -173,7 +173,7 @@ fn handle_update_timeout_window_blob(
         })
         .or_insert_with(|| {
             (
-                Some(Contract {
+                ContractStatus::Updated(Contract {
                     timeout_window: update.timeout_window.clone(),
                     ..contract
                 }),

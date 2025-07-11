@@ -51,10 +51,16 @@ impl ModifiedContractFields {
     }
 }
 
-// When processing blobs, maintain an up-to-date copy of the contract,
+// When processing blobs, maintain an up-to-date status of the contract,
 // and keep track of which fields changed and the list of side effects we processed.
-// If the contract is None, then it was deleted.
-type ModifiedContractData = (Option<Contract>, ModifiedContractFields, Vec<SideEffect>);
+type ModifiedContractData = (ContractStatus, ModifiedContractFields, Vec<SideEffect>);
+
+#[derive(Debug, Clone)]
+enum ContractStatus {
+    Deleted,
+    UnknownState,
+    Updated(Contract),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SettlementStatus {
@@ -748,6 +754,7 @@ impl NodeState {
             }
         } else {
             Self::settle_blobs_recursively(
+                self.current_height,
                 &self.contracts,
                 SettlementStatus::Unknown,
                 updated_contracts,
@@ -798,6 +805,7 @@ impl NodeState {
     }
 
     fn settle_blobs_recursively<'a>(
+        current_height: BlockHeight,
         contracts: &HashMap<ContractName, Contract>,
         mut settlement_status: SettlementStatus,
         mut contract_changes: BTreeMap<ContractName, ModifiedContractData>,
@@ -837,6 +845,7 @@ impl NodeState {
                 Ok(()) => {
                     tracing::trace!("Settlement - OK side effect");
                     Self::settle_blobs_recursively(
+                        current_height,
                         contracts,
                         settlement_status,
                         contract_changes,
@@ -900,6 +909,7 @@ impl NodeState {
 
             tracing::trace!("Settlement - OK blob");
             let settlement_result = Self::settle_blobs_recursively(
+                current_height,
                 contracts,
                 settlement_status.clone(),
                 current_contracts,
@@ -912,10 +922,42 @@ impl NodeState {
                 SettlementStatus::SettleAsSuccess | SettlementStatus::SettleAsFailed => {
                     return settlement_result;
                 }
-                _ => continue,
+                SettlementStatus::NotReadyToSettle | SettlementStatus::Unknown => continue,
             }
         }
-        // If we end up here we didn't manage to settle all blobs, so the TX isn't ready yet.
+
+        // Feature flag
+        if current_height > BlockHeight(1_500_000) {
+            // If we end up here we didn't manage to settle all blobs
+            // We update the status of the contract in contract_changes; so that we can move on in recursion to find valid failing blobs.
+            contract_changes
+                .entry(contract_name.clone())
+                .and_modify(|(contract_status, ..)| {
+                    *contract_status = ContractStatus::UnknownState;
+                })
+                .or_insert((
+                    ContractStatus::UnknownState,
+                    ModifiedContractFields::all(),
+                    vec![],
+                ));
+
+            let remaining_settlement = Self::settle_blobs_recursively(
+                current_height,
+                contracts,
+                settlement_status,
+                contract_changes.clone(),
+                blob_iter,
+                blob_proof_output_indices.clone(),
+                events,
+            );
+
+            // If we found a failure in remaining blobs, return it
+            if remaining_settlement.settlement_status == SettlementStatus::SettleAsFailed {
+                return remaining_settlement;
+            }
+        }
+
+        // If we end up here, the TX isn't ready yet.
         SettlementResult {
             settlement_status: SettlementStatus::NotReadyToSettle,
             contract_changes,
@@ -1019,7 +1061,12 @@ impl NodeState {
             settlement_result.contract_changes.into_iter()
         {
             match mc {
-                None => {
+                ContractStatus::UnknownState => {
+                    unreachable!(
+                        "Contract status should not be UnknownState when trying to settle a blob tx"
+                    );
+                }
+                ContractStatus::Deleted => {
                     debug!("✏️ Delete {} contract", contract_name);
                     self.contracts.remove(&contract_name);
 
@@ -1068,7 +1115,7 @@ impl NodeState {
 
                     continue;
                 }
-                Some(contract) => {
+                ContractStatus::Updated(contract) => {
                     // Otherwise, apply any side effect and potentially note it in the map of registered contracts.
                     if !self.contracts.contains_key(&contract_name) {
                         info!("📝 Registering contract {}", contract_name);
@@ -1336,17 +1383,18 @@ impl NodeState {
         contract_changes: &'a BTreeMap<ContractName, ModifiedContractData>,
         contract_name: &ContractName,
     ) -> Result<&'a Contract, Error> {
-        let Some(Some(contract)) = contract_changes
+        let contract = contract_changes
             .get(contract_name)
-            .map(|(mc, ..)| mc.as_ref())
-            .or(contracts.get(contract_name).map(Some))
-        else {
-            // Contract not found (presumably no longer exists), we can't settle this TX.
-            bail!(
-                "Cannot settle blob, contract '{}' no longer exists",
-                contract_name
-            );
-        };
+            .and_then(|(contract_status, ..)| match contract_status {
+                ContractStatus::Updated(contract) => Some(contract),
+                ContractStatus::Deleted | ContractStatus::UnknownState => None,
+            })
+            .or_else(|| contracts.get(contract_name))
+            .ok_or_else(|| {
+                Error::msg(format!(
+                    "Cannot settle blob, contract '{contract_name}' no longer exists"
+                ))
+            })?;
         Ok(contract)
     }
 
@@ -1414,7 +1462,7 @@ impl NodeState {
                     contract_changes.insert(
                         effect.contract_name.clone(),
                         (
-                            Some(Contract {
+                            ContractStatus::Updated(Contract {
                                 name: effect.contract_name.clone(),
                                 program_id: effect.program_id.clone(),
                                 state: effect.state_commitment.clone(),
@@ -1437,12 +1485,12 @@ impl NodeState {
                     contract_changes
                         .entry(cn.clone())
                         .and_modify(|c| {
-                            c.0 = None; // Mark the contract as deleted
+                            c.0 = ContractStatus::Deleted;
                             c.2.push(SideEffect::Delete);
                         })
                         .or_insert_with(|| {
                             (
-                                None,
+                                ContractStatus::Deleted,
                                 ModifiedContractFields::all(),
                                 vec![SideEffect::Delete],
                             )
@@ -1456,7 +1504,7 @@ impl NodeState {
         contract_changes
             .entry(contract_name)
             .and_modify(|u| {
-                if let Some(c) = u.0.as_mut() {
+                if let ContractStatus::Updated(ref mut c) = u.0 {
                     c.state = proof_metadata.1.next_state.clone();
                     u.1.state = true;
                     u.2.push(SideEffect::UpdateState);
@@ -1464,7 +1512,7 @@ impl NodeState {
             })
             .or_insert_with(|| {
                 (
-                    Some(Contract {
+                    ContractStatus::Updated(Contract {
                         state: proof_metadata.1.next_state.clone(),
                         ..contract
                     }),
